@@ -1,5 +1,5 @@
 CXX := gcc
-CFLAGS := -std=c99
+CFLAGS := -std=gnu99
 
 SOURCES = $(wildcard *.c)
 EXECS = $(patsubst %.c, %.exe, $(SOURCES))
@@ -25,6 +25,17 @@ write_file.exe: write_file.c
 
 read_file.exe: read_file.c
 	$(CXX) $(CFLAGS) $< -o $@
+
+parse_args.exe: parse_args.c
+	$(CXX) $(CFLAGS) $< -o $@
+
+naive_benchmark.exe: naive_benchmark.c
+	$(CXX) $(CFLAGS) -O0 $< -o naive_benchmark_O0.exe
+	$(CXX) $(CFLAGS) -O1 $< -o naive_benchmark_O1.exe
+	$(CXX) $(CFLAGS) -O2 $< -o naive_benchmark_O2.exe
+	$(CXX) $(CFLAGS) -O3 $< -o naive_benchmark_O3.exe
+	$(CXX) $(CFLAGS) -Os $< -o naive_benchmark_Os.exe
+	$(CXX) $(CFLAGS) -Og $< -o naive_benchmark_Og.exe
 
 run: stack_alloc.exe
 	@time ./stack_alloc.exe
