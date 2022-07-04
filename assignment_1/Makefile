@@ -25,5 +25,17 @@ valgrind_test.exe: valgrind_test.c
 gdb_test.exe: gdb_test.c
 	$(CXX) $(CFLAGS) -O0 -g $< -o $@
 
+same_file.exe: same_file.c
+	$(CXX) $(CFLAGS) -O3 $< -o $@
+
+different_file_mul.exe: different_file_mul.c
+	# Do nothing for "different_file_mul.c"
+
+different_file.exe: different_file.c
+	$(CXX) $(CFLAGS) -O3 different_file_mul.c $< -o $@
+
+inlined_manually.exe: inlined_manually.c
+	$(CXX) $(CFLAGS) -O3 $< -o $@
+
 clean:
 	rm -rf *.exe *.o *.s
