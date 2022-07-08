@@ -37,5 +37,9 @@ different_file.exe: different_file.c
 inlined_manually.exe: inlined_manually.c
 	$(CXX) $(CFLAGS) -O3 $< -o $@
 
+locality.exe: locality.c
+	$(CXX) $(CFLAGS) -O0 $< -o locality_O0.exe
+	$(CXX) $(CFLAGS) -O2 $< -o locality_O2.exe
+
 clean:
 	rm -rf *.exe *.o *.s
