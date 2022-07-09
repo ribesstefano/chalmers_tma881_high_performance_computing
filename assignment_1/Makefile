@@ -40,6 +40,17 @@ inlined_manually.exe: inlined_manually.c
 locality.exe: locality.c
 	$(CXX) $(CFLAGS) -O0 $< -o locality_O0.exe
 	$(CXX) $(CFLAGS) -O2 $< -o locality_O2.exe
+	$(CXX) $(CFLAGS) -O2 -march=x86-64 $< -o locality_O2arch.exe
+
+data_dependency.exe: data_dependency.c
+	$(CXX) $(CFLAGS) -O0 $< -o data_dependency_O0.exe
+	$(CXX) $(CFLAGS) -O2 $< -o data_dependency_O2.exe
+	$(CXX) $(CFLAGS) -O2 -march=x86-64 $< -o data_dependency_O2arch.exe
+
+indirect_addressing.exe: indirect_addressing.c
+	$(CXX) $(CFLAGS) -O0 $< -o indirect_addressing_O0.exe
+	$(CXX) $(CFLAGS) -O2 $< -o indirect_addressing_O2.exe
+	$(CXX) $(CFLAGS) -O2 -march=x86-64 $< -o indirect_addressing_O2arch.exe
 
 clean:
 	rm -rf *.exe *.o *.s
