@@ -1,5 +1,5 @@
 CXX := gcc
-CFLAGS := -std=gnu99 -fopenmp -m
+CFLAGS := -std=gnu99 -fopenmp -lm
 
 SOURCES = $(wildcard *.c)
 EXECS = $(patsubst %.c, %.exe, $(SOURCES))

@@ -6,15 +6,19 @@
 #include <omp.h>
 #include <time.h>
 #include <stdint.h>
-#include <fctnl.h>
+#include <fcntl.h>
+#include <math.h>
 
 typedef struct {
-  signed char x_int, y_int, z_int;
-  signed int16_t x_dec, y_dec, z_dec;
+  signed char x_int;
+  signed char y_int;
+  signed char z_int;
+  int16_t x_dec;
+  int16_t y_dec;
+  int16_t z_dec;
 } cell_t;
 
-void parse_number(const char* line_str, signed char* int_part,
-    signed int16_t* dec_part) {
+void parse_number(const char* line_str, signed char* int_part, int16_t* dec_part) {
   // Example line: "-04.238 -07.514 +08.942"
   const char kASCII_Offset = 48;
   *int_part = (line_str[1] - kASCII_Offset) * 10 + line_str[2] - kASCII_Offset;
@@ -36,13 +40,14 @@ cell_t parse_line(const char* line_str) {
 }
 
 void print_cell(const cell_t cell) {
-  printf("%c%02d.%03d ", (cell.x_int > 0 ? '+' : '-'), cell.x_int, cell.x_dec);
-  printf("%c%02d.%03d ", (cell.y_int > 0 ? '+' : '-'), cell.y_int, cell.y_dec);
-  printf("%c%02d.%03d\n", (cell.z_int > 0 ? '+' : '-'), cell.z_int, cell.z_dec);
+  printf("%c%02d.%03d ", (cell.x_int > 0 ? '+' : '-'), abs(cell.x_int), abs(cell.x_dec));
+  printf("%c%02d.%03d ", (cell.y_int > 0 ? '+' : '-'), abs(cell.y_int), abs(cell.y_dec));
+  printf("%c%02d.%03d\n", (cell.z_int > 0 ? '+' : '-'), abs(cell.z_int), abs(cell.z_dec));
 }
 
 int main(int argc, char const *argv[]) {
   srand(time(NULL));
+  int opt;
   int num_omp_threads = 1;
   // NOTE: The colon after the argument makes it a "required argument"
   while ((opt = getopt(argc, argv, "t:")) != -1) {
@@ -75,8 +80,8 @@ int main(int argc, char const *argv[]) {
   fseek(fp, 0, SEEK_END); // Go to end of file
   const int kBytesPerLine = 23 + 1; // 23 character plus the return char
   const long int kNumCells = ftell(fp) / kBytesPerLine;
+  printf("INFO. Number of cells: %d\n", kNumCells);
   fseek(fp, 0, SEEK_SET); // Seek back to beginning of file
-
   char* line = (char*)malloc(kBytesPerLine);
 
   // Test reading cells
