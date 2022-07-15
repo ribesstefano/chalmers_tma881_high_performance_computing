@@ -9,24 +9,37 @@
 #include <fcntl.h>
 #include <math.h>
 
+#ifndef FIX_POINT_FRAC_BITS
+#define FIX_POINT_FRAC_BITS 10
+#endif
+
+const float fix2float_scaler = 1.0 / (float)(1 << FIX_POINT_FRAC_BITS);
+
 typedef struct {
-  signed char x_int;
-  signed char y_int;
-  signed char z_int;
-  int16_t x_dec;
-  int16_t y_dec;
-  int16_t z_dec;
+  signed char x_int, y_int, z_int;
+  int16_t x_dec, y_dec, z_dec;
 } cell_t;
 
-void parse_number(const char* line_str, signed char* int_part, int16_t* dec_part) {
+/*
+ * The distance struct is encoded with the distance value and the distance
+ * count. The value part is encoded in fixed point format, with 10 bits for the
+ * decimal part. The count is limited to 2^16, i.e. 2 bytes, meaning that each
+ * distinct distance can appear/be counted up to 2^16 times.
+ */
+typedef struct {
+  uint16_t val;
+  uint16_t count;
+} dist_t;
+
+void parse_number(const char* line_str, signed char* intp, int16_t* decp) {
   // Example line: "-04.238 -07.514 +08.942"
   const char kASCII_Offset = 48;
-  *int_part = (line_str[1] - kASCII_Offset) * 10 + line_str[2] - kASCII_Offset;
-  *dec_part = (line_str[4] - kASCII_Offset) * 100 +
+  *intp = (line_str[1] - kASCII_Offset) * 10 + line_str[2] - kASCII_Offset;
+  *decp = (line_str[4] - kASCII_Offset) * 100 +
               (line_str[5] - kASCII_Offset) * 10 + line_str[6] - kASCII_Offset;
   if (line_str[0] == '-') {
-    *int_part = - (*int_part);
-    *dec_part = - (*dec_part);
+    *intp = - (*intp);
+    *decp = - (*decp);
   }
 }
 
@@ -42,10 +55,87 @@ cell_t parse_line(const char* line_str) {
 void print_cell(const cell_t cell) {
   printf("%c%02d.%03d ", (cell.x_int > 0 ? '+' : '-'), abs(cell.x_int), abs(cell.x_dec));
   printf("%c%02d.%03d ", (cell.y_int > 0 ? '+' : '-'), abs(cell.y_int), abs(cell.y_dec));
-  printf("%c%02d.%03d\n", (cell.z_int > 0 ? '+' : '-'), abs(cell.z_int), abs(cell.z_dec));
+  printf("%c%02d.%03d ", (cell.z_int > 0 ? '+' : '-'), abs(cell.z_int), abs(cell.z_dec));
 }
 
-int main(int argc, char const *argv[]) {
+float cell2float_x(const cell_t a) {
+  float ret = a.x_int * 1.0 + a.x_dec * 0.001;
+  return ret;
+}
+
+float cell2float_y(const cell_t a) {
+  float ret = a.y_int * 1.0 + a.y_dec * 0.001;
+  return ret;
+}
+
+float cell2float_z(const cell_t a) {
+  float ret = a.z_int * 1.0 + a.z_dec * 0.001;
+  return ret;
+}
+
+float cell2float(const cell_t a, const char dim) {
+  float ret = 0;
+  switch (dim) {
+    case 'x':
+      ret = a.x_int * 1.0 + a.x_dec * 0.001;
+      break;
+    case 'y':
+      ret = a.y_int * 1.0 + a.y_dec * 0.001;
+      break;
+    case 'z':
+      ret = a.z_int * 1.0 + a.z_dec * 0.001;
+      break;
+    default:
+      ret = a.x_int * 1.0 + a.x_dec * 0.001;
+      break;
+  }
+  return ret;
+}
+
+float cell_dist(const cell_t a, const cell_t b) {
+  float x_diff = cell2float(a, 'x') - cell2float(b, 'x');
+  float y_diff = cell2float(a, 'y') - cell2float(b, 'y');
+  float z_diff = cell2float(a, 'z') - cell2float(b, 'z');
+  float x_pow = x_diff * x_diff;
+  float y_pow = y_diff * y_diff;
+  float z_pow = z_diff * z_diff;
+  return sqrt(x_pow + y_pow + z_pow);
+}
+
+uint16_t dist2fix(const float d) {
+  return (uint16_t)(d * (1 << FIX_POINT_FRAC_BITS));
+}
+
+void print_dist(const dist_t a) {
+  float dist = (float)a.val * fix2float_scaler;
+  // TODO: The leading zeros are not printed. Why?
+  if (dist < 10) {
+    printf("0%02.2f %d\n", dist, a.count);
+  } else {
+    printf("%02.2f %d\n", dist, a.count);
+  }
+}
+
+int compare_dist(const void* a, const void* b) {
+  // Used in qsort: compare the fixed point value of two distance struct.
+  return (((dist_t*)a)->val > ((dist_t*)b)->val) ? 1 : -1;
+}
+
+int main(int argc, char* const* argv) {
+  /*
+   * Performance goal:
+   * 
+   * Number of points   1e4   1e5   1e5   1e5
+   * Number of threads   1   5   10  20
+   * Maximal runtime in seconds  0.33  10.3  5.40  2.88
+   * 
+   * Max number of cells: 2^32 = 4,294,967,296
+   * Max number of distances: 2^64 = 1.8446744e+19
+   * Max number of allocated cells at the time: 582,542
+   * Max number of allocated distances (4+4 bytes per element):  655,360
+   * Max number of allocated distances (4 bytes per element): 1,310,720
+   * 
+   */
   srand(time(NULL));
   int opt;
   int num_omp_threads = 1;
@@ -61,6 +151,7 @@ int main(int argc, char const *argv[]) {
     }
   }
   printf("INFO. Number of OpenMP threads: %d\n", num_omp_threads);
+  omp_set_num_threads(num_omp_threads);
 
   FILE *fp;
   const char kCellsFilename[] = "cells.txt";
@@ -80,18 +171,55 @@ int main(int argc, char const *argv[]) {
   fseek(fp, 0, SEEK_END); // Go to end of file
   const int kBytesPerLine = 23 + 1; // 23 character plus the return char
   const long int kNumCells = ftell(fp) / kBytesPerLine;
-  printf("INFO. Number of cells: %d\n", kNumCells);
   fseek(fp, 0, SEEK_SET); // Seek back to beginning of file
-  char* line = (char*)malloc(kBytesPerLine);
+  char* line_buffer = (char*)malloc(kBytesPerLine);
 
-  // Test reading cells
+
+  dist_t* distances = (dist_t*)malloc(sizeof(dist_t) * kNumCells * kNumCells);
+  cell_t* cells = (cell_t*)malloc(sizeof(cell_t) * kNumCells);
+
+  // Read all cells
+  fread(line_buffer, kBytesPerLine, 1, fp);
+  cell_t a = parse_line(line_buffer);
+  print_cell(a);
   for (int i = 0; i < kNumCells; ++i) {
-    fread(line, kBytesPerLine, 1, fp);
-    cell_t cell = parse_line(line);
-    print_cell(cell);
+    fread(line_buffer, kBytesPerLine, 1, fp);
+    cells[i] = parse_line(line_buffer);
+  }
+  printf("INFO. Number of cells: %d\n", kNumCells);
+
+  // Naive implementation
+  int num_distinct_dists = 0;
+  for (int i = 0; i < kNumCells; ++i) {
+    cell_t base = cells[i];
+    for (int j = 0; j < kNumCells; ++j) {
+      if (i == j) {
+        continue;
+      }
+      uint16_t dist_fix = dist2fix(cell_dist(base, cells[j]));
+      // printf("%f\n", cell_dist(base, cells[j]));
+      bool dist_found = false;
+      for (int k = 0; k < num_distinct_dists; ++k) {
+        if (distances[k].val == dist_fix) {
+          ++distances[k].count;
+          dist_found = true;
+          break;
+        }
+      }
+      if (!dist_found) {
+        distances[++num_distinct_dists].val = dist_fix;
+        distances[++num_distinct_dists].count = 1;
+      }
+    }
   }
 
+  qsort(distances, num_distinct_dists, sizeof(dist_t), compare_dist);
+  for (int i = 0; i < num_distinct_dists; ++i) {
+    print_dist(distances[i]);
+  }
   fclose(fp);
-  free(line);
+  free(line_buffer);
+  free(distances);
+  free(cells);
   return 0;
 }
