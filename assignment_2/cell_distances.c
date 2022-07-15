@@ -179,12 +179,11 @@ int main(int argc, char* const* argv) {
   cell_t* cells = (cell_t*)malloc(sizeof(cell_t) * kNumCells);
 
   // Read all cells
-  fread(line_buffer, kBytesPerLine, 1, fp);
-  cell_t a = parse_line(line_buffer);
-  print_cell(a);
   for (int i = 0; i < kNumCells; ++i) {
     fread(line_buffer, kBytesPerLine, 1, fp);
     cells[i] = parse_line(line_buffer);
+    print_cell(cells[i]);
+    printf("\n");
   }
   printf("INFO. Number of cells: %d\n", kNumCells);
 
@@ -208,7 +207,7 @@ int main(int argc, char* const* argv) {
       }
       if (!dist_found) {
         distances[++num_distinct_dists].val = dist_fix;
-        distances[++num_distinct_dists].count = 1;
+        distances[num_distinct_dists].count = 1;
       }
     }
   }
