@@ -31,7 +31,7 @@ typedef struct {
   uint16_t count;
 } dist_t;
 
-void parse_number(const char* line_str, signed char* intp, int16_t* decp) {
+inline void parse_number(const char* line_str, signed char* intp, int16_t* decp) {
   // Example line: "-04.238 -07.514 +08.942"
   const char kASCII_Offset = 48;
   *intp = (line_str[1] - kASCII_Offset) * 10 + line_str[2] - kASCII_Offset;
@@ -43,13 +43,23 @@ void parse_number(const char* line_str, signed char* intp, int16_t* decp) {
   }
 }
 
-cell_t parse_line(const char* line_str) {
+inline cell_t parse_line(const char* line_str) {
   // Example line: "-04.238 -07.514 +08.942"
   cell_t encoded;
   parse_number(&line_str[0], &encoded.x_int, &encoded.x_dec);
   parse_number(&line_str[8], &encoded.y_int, &encoded.y_dec);
   parse_number(&line_str[16], &encoded.z_int, &encoded.z_dec);
   return encoded;
+}
+
+inline cell_t read_cell(FILE* fp) {
+  const int kBytesPerLine = 23 + 1; // 23 character plus the return char
+  char line_buffer[kBytesPerLine];
+  if (fread(line_buffer, kBytesPerLine, 1, fp) != kBytesPerLine) {
+    // fprintf(stderr, "ERROR. Wrong number of bytes read.\n");
+    // exit(EXIT_FAILURE);
+  }
+  return parse_line(line_buffer);
 }
 
 void print_cell(const cell_t cell) {
@@ -121,6 +131,10 @@ int compare_dist(const void* a, const void* b) {
   return (((dist_t*)a)->val > ((dist_t*)b)->val) ? 1 : -1;
 }
 
+inline min(const int a, const int b) {
+  return (a < b) ? a : b;
+}
+
 int main(int argc, char* const* argv) {
   /*
    * Performance goal:
@@ -172,51 +186,127 @@ int main(int argc, char* const* argv) {
   const int kBytesPerLine = 23 + 1; // 23 character plus the return char
   const long int kNumCells = ftell(fp) / kBytesPerLine;
   fseek(fp, 0, SEEK_SET); // Seek back to beginning of file
-  char* line_buffer = (char*)malloc(kBytesPerLine);
+  char line_buffer[kBytesPerLine];
 
+  /*
+   * Naive implementation: read all cells and loop over them
+   */
+  dist_t* distances = (dist_t*)malloc(sizeof(dist_t) * kNumCells * kNumCells / 2);
+  // cell_t* cells = (cell_t*)malloc(sizeof(cell_t) * kNumCells);
+  // // Read all cells
+  // for (int i = 0; i < kNumCells; ++i) {
+  //   fread(line_buffer, kBytesPerLine, 1, fp);
+  //   cells[i] = parse_line(line_buffer);
+  //   // print_cell(cells[i]);
+  //   // printf("\n");
+  // }
+  // // printf("INFO. Number of cells: %ld\n", kNumCells);
+  // // Compute distances
+  // int num_distinct_dists = 0;
+  // for (int i = 0; i < kNumCells; ++i) {
+  //   cell_t base = cells[i];
+  //   for (int j = i + 1; j < kNumCells; ++j) {
+  //     uint16_t dist_fix = dist2fix(cell_dist(base, cells[j]));
+  //     // printf("%f\n", cell_dist(base, cells[j]));
+  //     bool dist_found = false;
+  //     for (int k = 0; k < num_distinct_dists; ++k) {
+  //       if (distances[k].val == dist_fix) {
+  //         ++distances[k].count;
+  //         dist_found = true;
+  //         break;
+  //       }
+  //     }
+  //     if (!dist_found) {
+  //       distances[num_distinct_dists].val = dist_fix;
+  //       distances[num_distinct_dists].count = 1;
+  //       ++num_distinct_dists;
+  //     }
+  //   }
+  // }
+  // // Sort then print them
+  // qsort(distances, num_distinct_dists, sizeof(dist_t), compare_dist);
+  // for (int i = 0; i < num_distinct_dists; ++i) {
+  //   print_dist(distances[i]);
+  // }
+  
+  /*
+  c1  c2  c3  ... cN
+  c2  0   d23 ... d2N
+  c3  d32 0   ... d3N
+  .
+  .
+  .
+  cN  dN2
+   */
 
-  dist_t* distances = (dist_t*)malloc(sizeof(dist_t) * kNumCells * kNumCells);
-  cell_t* cells = (cell_t*)malloc(sizeof(cell_t) * kNumCells);
-
-  // Read all cells
-  for (int i = 0; i < kNumCells; ++i) {
-    fread(line_buffer, kBytesPerLine, 1, fp);
-    cells[i] = parse_line(line_buffer);
-    // print_cell(cells[i]);
-    // printf("\n");
-  }
-  // printf("INFO. Number of cells: %ld\n", kNumCells);
-
-  // Naive implementation
   int num_distinct_dists = 0;
-  for (int i = 0; i < kNumCells; ++i) {
-    cell_t base = cells[i];
-    for (int j = i + 1; j < kNumCells; ++j) {
-      uint16_t dist_fix = dist2fix(cell_dist(base, cells[j]));
-      // printf("%f\n", cell_dist(base, cells[j]));
-      bool dist_found = false;
-      for (int k = 0; k < num_distinct_dists; ++k) {
-        if (distances[k].val == dist_fix) {
-          ++distances[k].count;
-          dist_found = true;
-          break;
+  int m, p;
+
+  fseek(fp, 0, SEEK_SET); // Seek back to beginning of file
+  const int block_size = 8;
+  cell_t* base_cells = (cell_t*)malloc(sizeof(cell_t) * num_omp_threads);
+  cell_t block_cells[block_size];
+
+  for (int i = 0; i < kNumCells; i += num_omp_threads) {
+
+    // Read shared base cells (the columns)
+    fseek(fp, i * kBytesPerLine, SEEK_SET);
+    for (int j = i; j < min(i + num_omp_threads, kNumCells); ++j) {
+      base_cells[j-i] = read_cell(fp);
+      // printf("reading into base cell n.%d\n", j-i);
+      m = j-i+1;
+    }
+
+    // Scroll over all remaining cells starting from the current base (the rows)
+    for (int j = i + 1; j < kNumCells; j += block_size) {
+
+      // Load the current block of cells
+      fseek(fp, j * kBytesPerLine, SEEK_SET);
+      for (int k = j; k < min(j + block_size, kNumCells); ++k) {
+        block_cells[k-j] = read_cell(fp);
+        // printf("\treading into block cell n.%d\n", k-j);
+        p = k-j+1;
+      }
+
+
+      // Do the computation on the block
+      // NOTE: If it is the left-most block, then we need to skip the first
+      // elements.
+      for (int ii = 0; ii < m; ++ii) {
+        for (int jj = (j == i + 1) ? ii : 0; jj < p; ++jj) {
+
+          uint16_t dist_fix = dist2fix(cell_dist(base_cells[ii], block_cells[jj]));
+          bool dist_found = false;
+          for (int k = 0; k < num_distinct_dists; ++k) {
+            if (distances[k].val == dist_fix) {
+              #pragma omp atomic
+              ++distances[k].count;
+              dist_found = true;
+              break;
+            }
+          }
+          if (!dist_found) {
+            distances[num_distinct_dists].val = dist_fix;
+            distances[num_distinct_dists].count = 1;
+            ++num_distinct_dists;
+          }
         }
       }
-      if (!dist_found) {
-        distances[num_distinct_dists].val = dist_fix;
-        distances[num_distinct_dists].count = 1;
-        ++num_distinct_dists;
-      }
-    }
-  }
 
+    } // end row-scrolling
+
+  }
+  free(base_cells);
+  // Sort and print
   qsort(distances, num_distinct_dists, sizeof(dist_t), compare_dist);
   for (int i = 0; i < num_distinct_dists; ++i) {
     print_dist(distances[i]);
   }
+
+
+
   fclose(fp);
-  free(line_buffer);
   free(distances);
-  free(cells);
+  // free(cells);
   return 0;
 }
