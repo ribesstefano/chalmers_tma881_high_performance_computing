@@ -109,7 +109,7 @@ uint16_t dist2fix(const float d) {
 void print_dist(const dist_t a) {
   float dist = (float)a.val * fix2float_scaler;
   // TODO: The leading zeros are not printed. Why?
-  if (dist < 10) {
+  if (dist < 10.0) {
     printf("0%02.2f %d\n", dist, a.count);
   } else {
     printf("%02.2f %d\n", dist, a.count);
@@ -150,7 +150,7 @@ int main(int argc, char* const* argv) {
       exit(EXIT_FAILURE);
     }
   }
-  printf("INFO. Number of OpenMP threads: %d\n", num_omp_threads);
+  // printf("INFO. Number of OpenMP threads: %d\n", num_omp_threads);
   omp_set_num_threads(num_omp_threads);
 
   FILE *fp;
@@ -182,19 +182,16 @@ int main(int argc, char* const* argv) {
   for (int i = 0; i < kNumCells; ++i) {
     fread(line_buffer, kBytesPerLine, 1, fp);
     cells[i] = parse_line(line_buffer);
-    print_cell(cells[i]);
-    printf("\n");
+    // print_cell(cells[i]);
+    // printf("\n");
   }
-  printf("INFO. Number of cells: %d\n", kNumCells);
+  // printf("INFO. Number of cells: %ld\n", kNumCells);
 
   // Naive implementation
   int num_distinct_dists = 0;
   for (int i = 0; i < kNumCells; ++i) {
     cell_t base = cells[i];
-    for (int j = 0; j < kNumCells; ++j) {
-      if (i == j) {
-        continue;
-      }
+    for (int j = i + 1; j < kNumCells; ++j) {
       uint16_t dist_fix = dist2fix(cell_dist(base, cells[j]));
       // printf("%f\n", cell_dist(base, cells[j]));
       bool dist_found = false;
@@ -206,8 +203,9 @@ int main(int argc, char* const* argv) {
         }
       }
       if (!dist_found) {
-        distances[++num_distinct_dists].val = dist_fix;
+        distances[num_distinct_dists].val = dist_fix;
         distances[num_distinct_dists].count = 1;
+        ++num_distinct_dists;
       }
     }
   }
