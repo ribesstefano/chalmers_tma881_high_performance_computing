@@ -128,19 +128,98 @@ void print_dist(const dist_t a) {
 
 int compare_dist(const void* a, const void* b) {
   // Used in qsort: compare the fixed point value of two distance struct.
-  return (((dist_t*)a)->val > ((dist_t*)b)->val) ? 1 : -1;
+  const dist_t* a_dist = *(const dist_t**)a;
+  const dist_t* b_dist = *(const dist_t**)b;
+  if (a_dist == NULL) {
+    return 1;
+  }
+  if (b_dist == NULL) {
+    return -1;
+  }
+  return (a_dist->val > b_dist->val) ? 1 : -1;
 }
 
-inline min(const int a, const int b) {
+inline int min(const int a, const int b) {
   return (a < b) ? a : b;
+}
+
+uint32_t get_hash(const uint16_t din) {
+  /*
+   * Check this stackoverflow question:
+   * https://stackoverflow.com/questions/7666509/hash-function-for-string
+   *
+   * and a list of implementations in C: http://www.cse.yorku.ca/%7Eoz/hash.html
+   * 
+   * The following implements `djb2`, adjusted for uint16_t.
+   */
+  uint16_t tmp = din + 314;
+  char* str = (char*)(&tmp);
+  uint32_t hash = 0;
+  int c;
+  while (c = *str++) {
+    hash = c + (hash << 6) + (hash << 16) - hash;
+  }
+  return hash;
+}
+
+dist_t* search_table(const int table_size, const uint16_t dist, dist_t** hash_table, int* hash_index) {
+  // Get the hash 
+  int hash_idx = get_hash(dist) % table_size;
+  // Move in array until a match is found
+  while(hash_table[hash_idx] != NULL) {
+    if(hash_table[hash_idx]->val == dist) {
+      return hash_table[hash_idx];
+    }
+    // Go to next cell
+    ++hash_idx;
+    // Wrap around the table
+    hash_idx %= table_size;
+  }
+  *hash_index = hash_idx;
+  return NULL;        
+}
+
+void update_dist(const int table_size, const uint16_t dist, dist_t** hash_table) {
+  int hash_index;
+  dist_t* found_dist = search_table(table_size, dist, hash_table, &hash_index);
+  if (found_dist) {
+    found_dist->count++;
+  } else {
+    hash_table[hash_index] = (dist_t*)malloc(sizeof(dist_t));
+    hash_table[hash_index]->val = dist;
+    hash_table[hash_index]->count = 1;
+  }
+}
+
+void insert_dist(const int table_size, const dist_t data, dist_t** hash_table) {
+  dist_t* item = (dist_t*)malloc(sizeof(dist_t));
+  *item = data;
+  // Get the hash
+  int hash_index = data.val % table_size;
+  // Move in array until an empty or deleted cell
+  while(hash_table[hash_index] != NULL && hash_table[hash_index]->val != 0) {
+    // Go to next cell
+    ++hash_index;
+    // Wrap around the table
+    hash_index %= table_size;
+  }
+  hash_table[hash_index] = item;
+}
+
+void delete_table(const int table_size, dist_t** hash_table) {
+  for (int i = 0; i < table_size; ++i) {
+    if (hash_table[i] != NULL) {
+      free(hash_table[i]);
+    }
+  }
 }
 
 int main(int argc, char* const* argv) {
   /*
    * Performance goal:
    * 
-   * Number of points   1e4   1e5   1e5   1e5
-   * Number of threads   1   5   10  20
+   * Number of points            1e4   1e5   1e5   1e5
+   * Number of threads           1     5     10    20
    * Maximal runtime in seconds  0.33  10.3  5.40  2.88
    * 
    * Max number of cells: 2^32 = 4,294,967,296
@@ -186,12 +265,12 @@ int main(int argc, char* const* argv) {
   const int kBytesPerLine = 23 + 1; // 23 character plus the return char
   const long int kNumCells = ftell(fp) / kBytesPerLine;
   fseek(fp, 0, SEEK_SET); // Seek back to beginning of file
-  char line_buffer[kBytesPerLine];
 
   /*
    * Naive implementation: read all cells and loop over them
    */
-  dist_t* distances = (dist_t*)malloc(sizeof(dist_t) * kNumCells * kNumCells / 2);
+  // dist_t* distances = (dist_t*)malloc(sizeof(dist_t) * kNumCells * kNumCells / 2);
+  // char line_buffer[kBytesPerLine];
   // cell_t* cells = (cell_t*)malloc(sizeof(cell_t) * kNumCells);
   // // Read all cells
   // for (int i = 0; i < kNumCells; ++i) {
@@ -228,6 +307,8 @@ int main(int argc, char* const* argv) {
   // for (int i = 0; i < num_distinct_dists; ++i) {
   //   print_dist(distances[i]);
   // }
+  // free(distances);
+  // free(cells);
   
   /*
   c1  c2  c3  ... cN
@@ -243,70 +324,123 @@ int main(int argc, char* const* argv) {
   int m, p;
 
   fseek(fp, 0, SEEK_SET); // Seek back to beginning of file
-  const int block_size = 8;
-  cell_t* base_cells = (cell_t*)malloc(sizeof(cell_t) * num_omp_threads);
-  cell_t block_cells[block_size];
-
-  for (int i = 0; i < kNumCells; i += num_omp_threads) {
-
-    // Read shared base cells (the columns)
+  const int kBlockSize = 128;
+  // Cell block-buffers
+  cell_t* base_cells = (cell_t*)malloc(sizeof(cell_t) * kBlockSize);
+  cell_t* block_cells = (cell_t*)malloc(sizeof(cell_t) * kBlockSize);
+  // Distance block-buffer
+  uint16_t* block_d_entries = (uint16_t*)malloc(sizeof(uint16_t) * kBlockSize * kBlockSize);
+  uint16_t** block_distances = (uint16_t**) malloc(sizeof(uint16_t*) * kBlockSize);
+  for (int i = 0, j = 0; i < kBlockSize; ++i, j += kBlockSize) {
+    block_distances[i] = block_d_entries + j;
+  }
+  // Hash table
+  const int kHashTableSize = kNumCells * kNumCells / 2 - kNumCells / 2;
+  dist_t** hash_table = (dist_t**) malloc(sizeof(dist_t*) * kHashTableSize);
+  // Line buffer for reading "large chunks" from file
+  char* line_buffer = (char*)malloc(kBytesPerLine * kBlockSize);
+  /*
+   * Main algorithm
+   */
+  for (int i = 0; i < kNumCells; i += kBlockSize) {
+    /*
+     * Read shared base cells (the columns):
+     * 
+     * 1. Seek to the right position in the file
+     * 2. Get the block boundary (to avoid reading "outside" the file)
+     * 3. Read the file into a line buffer
+     * 4. Parse the lines into cell entries
+     */
     fseek(fp, i * kBytesPerLine, SEEK_SET);
-    for (int j = i; j < min(i + num_omp_threads, kNumCells); ++j) {
-      base_cells[j-i] = read_cell(fp);
-      // printf("reading into base cell n.%d\n", j-i);
-      m = j-i+1;
+    m = min(i + kBlockSize, kNumCells) - i;
+    for (int j = 0; j < m; ++j) {
+      fread(&line_buffer[j * kBytesPerLine], kBytesPerLine, 1, fp);
     }
-
-    // Scroll over all remaining cells starting from the current base (the rows)
-    for (int j = i + 1; j < kNumCells; j += block_size) {
-
-      // Load the current block of cells
+#pragma omp parallel for
+    for (int j = 0; j < m; ++j) {
+      base_cells[j] = parse_line(&line_buffer[j * kBytesPerLine]);
+    }
+    /*
+     * Scroll over all remaining cells starting from the current base (the rows)
+     */
+    for (int j = i + 1; j < kNumCells; j += kBlockSize) {
+      /*
+       * Similarly as above, load all the file entries block-wise:
+       * 
+       * 1. Seek to the right position in the file
+       * 2. Get the block boundary (to avoid reading "outside" the file)
+       * 3. Read the file into a line buffer
+       * 4. Parse the lines into cell entries
+       */
       fseek(fp, j * kBytesPerLine, SEEK_SET);
-      for (int k = j; k < min(j + block_size, kNumCells); ++k) {
-        block_cells[k-j] = read_cell(fp);
-        // printf("\treading into block cell n.%d\n", k-j);
-        p = k-j+1;
+      p = min(j + kBlockSize, kNumCells) - j;
+      for (int k = 0; k < p; ++k) {
+        fread(&line_buffer[k * kBytesPerLine], kBytesPerLine, 1, fp);
       }
-
-
-      // Do the computation on the block
-      // NOTE: If it is the left-most block, then we need to skip the first
-      // elements.
+#pragma omp parallel for
+      for (int k = 0; k < p; ++k) {
+        block_cells[k] = parse_line(&line_buffer[k * kBytesPerLine]);
+      }
+      /*
+       * Block computation: each element can be computed in parallel
+       *
+       * NOTE: If it is the left-most block, then we need to skip the first
+       * elements on the left.
+       *
+       * NOTE: OpenMP collapse clause cannot be used because the inner loop has
+       * variable loop iterations!
+       */
+//       if (j == i + 1) {
+// #pragma omp parallel for
+//         for (int ii = 0; ii < m; ++ii) {
+//           for (int jj = ii; jj < p; ++jj) {
+//             block_distances[ii][jj] =
+//               dist2fix(cell_dist(base_cells[ii], block_cells[jj]));
+//           }
+//         }
+//       } else {
+// #pragma omp parallel for collapse(2)
+//         for (int ii = 0; ii < m; ++ii) {
+//           for (int jj = 0; jj < p; ++jj) {
+//             block_distances[ii][jj] =
+//               dist2fix(cell_dist(base_cells[ii], block_cells[jj]));
+//           }
+//         }
+//       }
+#pragma omp parallel for
       for (int ii = 0; ii < m; ++ii) {
         for (int jj = (j == i + 1) ? ii : 0; jj < p; ++jj) {
-
-          uint16_t dist_fix = dist2fix(cell_dist(base_cells[ii], block_cells[jj]));
-          bool dist_found = false;
-          for (int k = 0; k < num_distinct_dists; ++k) {
-            if (distances[k].val == dist_fix) {
-              #pragma omp atomic
-              ++distances[k].count;
-              dist_found = true;
-              break;
-            }
-          }
-          if (!dist_found) {
-            distances[num_distinct_dists].val = dist_fix;
-            distances[num_distinct_dists].count = 1;
-            ++num_distinct_dists;
-          }
+          block_distances[ii][jj] =
+            dist2fix(cell_dist(base_cells[ii], block_cells[jj]));
         }
       }
-
+      /*
+       * Update the hash table containing all distances found so far
+       */
+// #pragma omp parallel for
+      for (int ii = 0; ii < m; ++ii) {
+        for (int jj = (j == i + 1) ? ii : 0; jj < p; ++jj) {
+          update_dist(kHashTableSize, block_distances[ii][jj], hash_table);
+        }
+      }
     } // end row-scrolling
-
   }
+  // Sort hash table and finally print
+  qsort(hash_table, kHashTableSize, sizeof(dist_t*), compare_dist);
+  for (int i = 0; i < kHashTableSize; ++i) {
+    if (hash_table[i] != NULL) {
+      print_dist(*hash_table[i]);
+    }
+  }
+
+  free(line_buffer);
   free(base_cells);
-  // Sort and print
-  qsort(distances, num_distinct_dists, sizeof(dist_t), compare_dist);
-  for (int i = 0; i < num_distinct_dists; ++i) {
-    print_dist(distances[i]);
-  }
-
-
+  free(block_cells);
+  free(block_distances);
+  // NOTE: Special care is needed to free the elements in the hash table
+  delete_table(kHashTableSize, hash_table);
+  free(hash_table);
 
   fclose(fp);
-  free(distances);
-  // free(cells);
   return 0;
 }
