@@ -14,6 +14,7 @@
 #endif
 
 const float fix2float_scaler = 1.0 / (float)(1 << FIX_POINT_FRAC_BITS);
+const int kBytesPerLine = 23 + 1; // 23 character plus the return char
 
 typedef struct {
   signed char x_int, y_int, z_int;
@@ -31,19 +32,25 @@ typedef struct {
   uint16_t count;
 } dist_t;
 
-inline void offset_line_buffer(const int len, char* line_buffer) {
+inline void offset_line_buffer(const int num_lines, char* line_buffer) {
   const char kASCII_Offset = 48;
+  const char kBytesPerCell = kBytesPerLine / 3;
 #pragma omp parallel for
-  for (int i = 0; i < len; ++i) {
+  for (int i = 0; i < num_lines * kBytesPerLine; ++i) {
     line_buffer[i] -= kASCII_Offset;
+  }
+#pragma omp parallel for
+  for (int i = 0; i < num_lines * kBytesPerLine; i += kBytesPerCell) {
+    line_buffer[i+1] *= 10;
+    line_buffer[i+5] *= 10;
   }
 }
 
 inline void parse_number(const char* line_str, signed char* intp, int16_t* decp) {
   // Example line: "-04.238 -07.514 +08.942"
   const char kASCII_Offset = 48;
-  *intp = line_str[2] + line_str[1] * 10;
-  *decp = line_str[6] + line_str[5] * 10 + line_str[4] * 100;
+  *intp = line_str[2] + line_str[1];
+  *decp = line_str[6] + line_str[5] + line_str[4] * 100;
   if (line_str[0] == '-' - kASCII_Offset) {
     *intp = - (*intp);
     *decp = - (*decp);
@@ -57,16 +64,6 @@ inline cell_t parse_line(const char* line_str) {
   parse_number(&line_str[8], &encoded.y_int, &encoded.y_dec);
   parse_number(&line_str[16], &encoded.z_int, &encoded.z_dec);
   return encoded;
-}
-
-inline cell_t read_cell(FILE* fp) {
-  const int kBytesPerLine = 23 + 1; // 23 character plus the return char
-  char line_buffer[kBytesPerLine];
-  if (fread(line_buffer, kBytesPerLine, 1, fp) != kBytesPerLine) {
-    // fprintf(stderr, "ERROR. Wrong number of bytes read.\n");
-    // exit(EXIT_FAILURE);
-  }
-  return parse_line(line_buffer);
 }
 
 void print_cell(const cell_t cell) {
@@ -275,7 +272,6 @@ int main(int argc, char* const* argv) {
    * the last row!
    */
   fseek(fp, 0, SEEK_END); // Go to end of file
-  const int kBytesPerLine = 23 + 1; // 23 character plus the return char
   const long int kNumCells = ftell(fp) / kBytesPerLine;
 
   const int kBlockSize = 512;
@@ -300,7 +296,7 @@ int main(int argc, char* const* argv) {
    */
   clock_t alg_start = clock();
 
-#pragma omp parallel
+// #pragma omp parallel
   for (int i = 0; i < kNumCells; i += kBlockSize) {
     /*
      * Read shared base cells (the columns):
@@ -310,14 +306,14 @@ int main(int argc, char* const* argv) {
      * 3. Read the file into a line buffer
      * 4. Parse the lines into cell entries
      */
-#pragma omp single
+#pragma omp critical
     {
       fseek(fp, i * kBytesPerLine, SEEK_SET);
       m = min(i + kBlockSize, kNumCells) - i;
       fread(line_buffer, m * kBytesPerLine, 1, fp);
     }
-    offset_line_buffer(m * kBytesPerLine, line_buffer);
-#pragma omp parallel for shared(m, base_cells, line_buffer)
+    offset_line_buffer(m, line_buffer);
+// #pragma omp parallel for
     for (int j = 0; j < m; ++j) {
       base_cells[j] = parse_line(&line_buffer[j * kBytesPerLine]);
     }
@@ -334,14 +330,14 @@ int main(int argc, char* const* argv) {
        * 3. Read the file into a line buffer
        * 4. Parse the lines into cell entries
        */
-#pragma omp single
+#pragma omp critical
       {
         fseek(fp, j * kBytesPerLine, SEEK_SET);
         p = min(j + kBlockSize, kNumCells) - j;
         fread(line_buffer, p * kBytesPerLine, 1, fp);
       }
-      offset_line_buffer(p * kBytesPerLine, line_buffer);
-#pragma omp parallel for shared(p, block_cells, line_buffer)
+      offset_line_buffer(p, line_buffer);
+#pragma omp parallel for
       for (int k = 0; k < p; ++k) {
         block_cells[k] = parse_line(&line_buffer[k * kBytesPerLine]);
       }
@@ -354,7 +350,7 @@ int main(int argc, char* const* argv) {
        * NOTE: OpenMP collapse clause cannot be used because the inner loop has
        * variable loop iterations!
        */
-#pragma omp parallel for shared(m, p, base_cells, block_cells)
+#pragma omp parallel for
       for (int ii = 0; ii < m; ++ii) {
         for (int jj = (j == i + 1) ? ii : 0; jj < p; ++jj) {
           block_distances[ii][jj] =
@@ -364,10 +360,12 @@ int main(int argc, char* const* argv) {
       /*
        * Update the hash table containing all distances found so far
        */
-#pragma omp parallel for shared(m, p, block_distances, hash_table)
-      for (int ii = 0; ii < m; ++ii) {
-        for (int jj = (j == i + 1) ? ii : 0; jj < p; ++jj) {
-          update_dist(kHashTableSize, block_distances[ii][jj], hash_table);
+#pragma omp critical
+      {
+        for (int ii = 0; ii < m; ++ii) {
+          for (int jj = (j == i + 1) ? ii : 0; jj < p; ++jj) {
+            update_dist(kHashTableSize, block_distances[ii][jj], hash_table);
+          }
         }
       }
     } // end row-scrolling

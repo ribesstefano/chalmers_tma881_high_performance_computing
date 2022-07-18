@@ -10,7 +10,10 @@ EXECS = $(patsubst %.c, %.exe, $(SOURCES))
 all: $(EXECS)
 
 cell_distances.exe: cell_distances.c
-	$(CXX) $(CFLAGS) -O2 -march=x86-64 $< -o cell_distances.exe $(LDFLAGS)
+	$(CXX) $(CFLAGS) -O3 -march=x86-64 $< -o cell_distances.exe $(LDFLAGS)
+
+hash_table.exe: hash_table.c
+	$(CXX) $(CFLAGS) -O2 -march=x86-64 $< -o hash_table.exe $(LDFLAGS)
 
 clean:
 	rm -rf *.exe *.o *.s
