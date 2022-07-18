@@ -31,13 +31,20 @@ typedef struct {
   uint16_t count;
 } dist_t;
 
+inline void offset_line_buffer(const int len, char* line_buffer) {
+  const char kASCII_Offset = 48;
+#pragma omp parallel for
+  for (int i = 0; i < len; ++i) {
+    line_buffer[i] -= kASCII_Offset;
+  }
+}
+
 inline void parse_number(const char* line_str, signed char* intp, int16_t* decp) {
   // Example line: "-04.238 -07.514 +08.942"
   const char kASCII_Offset = 48;
-  *intp = (line_str[1] - kASCII_Offset) * 10 + line_str[2] - kASCII_Offset;
-  *decp = (line_str[4] - kASCII_Offset) * 100 +
-              (line_str[5] - kASCII_Offset) * 10 + line_str[6] - kASCII_Offset;
-  if (line_str[0] == '-') {
+  *intp = line_str[2] + line_str[1] * 10;
+  *decp = line_str[6] + line_str[5] * 10 + line_str[4] * 100;
+  if (line_str[0] == '-' - kASCII_Offset) {
     *intp = - (*intp);
     *decp = - (*decp);
   }
@@ -83,7 +90,7 @@ float cell2float_z(const cell_t a) {
   return ret;
 }
 
-float cell2float(const cell_t a, const char dim) {
+inline float cell2float(const cell_t a, const char dim) {
   float ret = 0;
   switch (dim) {
     case 'x':
@@ -102,7 +109,7 @@ float cell2float(const cell_t a, const char dim) {
   return ret;
 }
 
-float cell_dist(const cell_t a, const cell_t b) {
+inline float cell_dist(const cell_t a, const cell_t b) {
   float x_diff = cell2float(a, 'x') - cell2float(b, 'x');
   float y_diff = cell2float(a, 'y') - cell2float(b, 'y');
   float z_diff = cell2float(a, 'z') - cell2float(b, 'z');
@@ -112,7 +119,7 @@ float cell_dist(const cell_t a, const cell_t b) {
   return sqrt(x_pow + y_pow + z_pow);
 }
 
-uint16_t dist2fix(const float d) {
+inline uint16_t dist2fix(const float d) {
   return (uint16_t)(d * (1 << FIX_POINT_FRAC_BITS));
 }
 
@@ -179,7 +186,7 @@ dist_t* search_table(const int table_size, const uint16_t dist, dist_t** hash_ta
   return NULL;        
 }
 
-void update_dist(const int table_size, const uint16_t dist, dist_t** hash_table) {
+inline void update_dist(const int table_size, const uint16_t dist, dist_t** hash_table) {
   int hash_index;
   dist_t* found_dist = search_table(table_size, dist, hash_table, &hash_index);
   if (found_dist) {
@@ -228,6 +235,13 @@ int main(int argc, char* const* argv) {
    * Max number of allocated distances (4+4 bytes per element):  655,360
    * Max number of allocated distances (4 bytes per element): 1,310,720
    * 
+   * c1  c2  c3  ... cN
+   * c2  0   d23 ... d2N
+   * c3  d32 0   ... d3N
+   * .
+   * .
+   * .
+   * cN  dN2
    */
   srand(time(NULL));
   int opt;
@@ -243,7 +257,6 @@ int main(int argc, char* const* argv) {
       exit(EXIT_FAILURE);
     }
   }
-  // printf("INFO. Number of OpenMP threads: %d\n", num_omp_threads);
   omp_set_num_threads(num_omp_threads);
 
   FILE *fp;
@@ -264,67 +277,10 @@ int main(int argc, char* const* argv) {
   fseek(fp, 0, SEEK_END); // Go to end of file
   const int kBytesPerLine = 23 + 1; // 23 character plus the return char
   const long int kNumCells = ftell(fp) / kBytesPerLine;
-  fseek(fp, 0, SEEK_SET); // Seek back to beginning of file
 
-  /*
-   * Naive implementation: read all cells and loop over them
-   */
-  // dist_t* distances = (dist_t*)malloc(sizeof(dist_t) * kNumCells * kNumCells / 2);
-  // char line_buffer[kBytesPerLine];
-  // cell_t* cells = (cell_t*)malloc(sizeof(cell_t) * kNumCells);
-  // // Read all cells
-  // for (int i = 0; i < kNumCells; ++i) {
-  //   fread(line_buffer, kBytesPerLine, 1, fp);
-  //   cells[i] = parse_line(line_buffer);
-  //   // print_cell(cells[i]);
-  //   // printf("\n");
-  // }
-  // // printf("INFO. Number of cells: %ld\n", kNumCells);
-  // // Compute distances
-  // int num_distinct_dists = 0;
-  // for (int i = 0; i < kNumCells; ++i) {
-  //   cell_t base = cells[i];
-  //   for (int j = i + 1; j < kNumCells; ++j) {
-  //     uint16_t dist_fix = dist2fix(cell_dist(base, cells[j]));
-  //     // printf("%f\n", cell_dist(base, cells[j]));
-  //     bool dist_found = false;
-  //     for (int k = 0; k < num_distinct_dists; ++k) {
-  //       if (distances[k].val == dist_fix) {
-  //         ++distances[k].count;
-  //         dist_found = true;
-  //         break;
-  //       }
-  //     }
-  //     if (!dist_found) {
-  //       distances[num_distinct_dists].val = dist_fix;
-  //       distances[num_distinct_dists].count = 1;
-  //       ++num_distinct_dists;
-  //     }
-  //   }
-  // }
-  // // Sort then print them
-  // qsort(distances, num_distinct_dists, sizeof(dist_t), compare_dist);
-  // for (int i = 0; i < num_distinct_dists; ++i) {
-  //   print_dist(distances[i]);
-  // }
-  // free(distances);
-  // free(cells);
-  
-  /*
-  c1  c2  c3  ... cN
-  c2  0   d23 ... d2N
-  c3  d32 0   ... d3N
-  .
-  .
-  .
-  cN  dN2
-   */
-
-  int num_distinct_dists = 0;
+  const int kBlockSize = 512;
   int m, p;
 
-  fseek(fp, 0, SEEK_SET); // Seek back to beginning of file
-  const int kBlockSize = 128;
   // Cell block-buffers
   cell_t* base_cells = (cell_t*)malloc(sizeof(cell_t) * kBlockSize);
   cell_t* block_cells = (cell_t*)malloc(sizeof(cell_t) * kBlockSize);
@@ -334,7 +290,7 @@ int main(int argc, char* const* argv) {
   for (int i = 0, j = 0; i < kBlockSize; ++i, j += kBlockSize) {
     block_distances[i] = block_d_entries + j;
   }
-  // Hash table
+  // Hash table to store and count the final distances
   const int kHashTableSize = kNumCells * kNumCells / 2 - kNumCells / 2;
   dist_t** hash_table = (dist_t**) malloc(sizeof(dist_t*) * kHashTableSize);
   // Line buffer for reading "large chunks" from file
@@ -342,6 +298,9 @@ int main(int argc, char* const* argv) {
   /*
    * Main algorithm
    */
+  clock_t alg_start = clock();
+
+#pragma omp parallel
   for (int i = 0; i < kNumCells; i += kBlockSize) {
     /*
      * Read shared base cells (the columns):
@@ -351,18 +310,21 @@ int main(int argc, char* const* argv) {
      * 3. Read the file into a line buffer
      * 4. Parse the lines into cell entries
      */
-    fseek(fp, i * kBytesPerLine, SEEK_SET);
-    m = min(i + kBlockSize, kNumCells) - i;
-    for (int j = 0; j < m; ++j) {
-      fread(&line_buffer[j * kBytesPerLine], kBytesPerLine, 1, fp);
+#pragma omp single
+    {
+      fseek(fp, i * kBytesPerLine, SEEK_SET);
+      m = min(i + kBlockSize, kNumCells) - i;
+      fread(line_buffer, m * kBytesPerLine, 1, fp);
     }
-#pragma omp parallel for
+    offset_line_buffer(m * kBytesPerLine, line_buffer);
+#pragma omp parallel for shared(m, base_cells, line_buffer)
     for (int j = 0; j < m; ++j) {
       base_cells[j] = parse_line(&line_buffer[j * kBytesPerLine]);
     }
     /*
      * Scroll over all remaining cells starting from the current base (the rows)
      */
+// #pragma omp parallel // shared(m, p) private(base_cells, block_cells, line_buffer)
     for (int j = i + 1; j < kNumCells; j += kBlockSize) {
       /*
        * Similarly as above, load all the file entries block-wise:
@@ -372,12 +334,14 @@ int main(int argc, char* const* argv) {
        * 3. Read the file into a line buffer
        * 4. Parse the lines into cell entries
        */
-      fseek(fp, j * kBytesPerLine, SEEK_SET);
-      p = min(j + kBlockSize, kNumCells) - j;
-      for (int k = 0; k < p; ++k) {
-        fread(&line_buffer[k * kBytesPerLine], kBytesPerLine, 1, fp);
+#pragma omp single
+      {
+        fseek(fp, j * kBytesPerLine, SEEK_SET);
+        p = min(j + kBlockSize, kNumCells) - j;
+        fread(line_buffer, p * kBytesPerLine, 1, fp);
       }
-#pragma omp parallel for
+      offset_line_buffer(p * kBytesPerLine, line_buffer);
+#pragma omp parallel for shared(p, block_cells, line_buffer)
       for (int k = 0; k < p; ++k) {
         block_cells[k] = parse_line(&line_buffer[k * kBytesPerLine]);
       }
@@ -390,24 +354,7 @@ int main(int argc, char* const* argv) {
        * NOTE: OpenMP collapse clause cannot be used because the inner loop has
        * variable loop iterations!
        */
-//       if (j == i + 1) {
-// #pragma omp parallel for
-//         for (int ii = 0; ii < m; ++ii) {
-//           for (int jj = ii; jj < p; ++jj) {
-//             block_distances[ii][jj] =
-//               dist2fix(cell_dist(base_cells[ii], block_cells[jj]));
-//           }
-//         }
-//       } else {
-// #pragma omp parallel for collapse(2)
-//         for (int ii = 0; ii < m; ++ii) {
-//           for (int jj = 0; jj < p; ++jj) {
-//             block_distances[ii][jj] =
-//               dist2fix(cell_dist(base_cells[ii], block_cells[jj]));
-//           }
-//         }
-//       }
-#pragma omp parallel for
+#pragma omp parallel for shared(m, p, base_cells, block_cells)
       for (int ii = 0; ii < m; ++ii) {
         for (int jj = (j == i + 1) ? ii : 0; jj < p; ++jj) {
           block_distances[ii][jj] =
@@ -417,7 +364,7 @@ int main(int argc, char* const* argv) {
       /*
        * Update the hash table containing all distances found so far
        */
-// #pragma omp parallel for
+#pragma omp parallel for shared(m, p, block_distances, hash_table)
       for (int ii = 0; ii < m; ++ii) {
         for (int jj = (j == i + 1) ? ii : 0; jj < p; ++jj) {
           update_dist(kHashTableSize, block_distances[ii][jj], hash_table);
@@ -425,13 +372,23 @@ int main(int argc, char* const* argv) {
       }
     } // end row-scrolling
   }
+  clock_t alg_end = clock();
+  float alg_tot_time = (float)(alg_end - alg_start) / CLOCKS_PER_SEC;
+
   // Sort hash table and finally print
+  clock_t sort_start = clock();
   qsort(hash_table, kHashTableSize, sizeof(dist_t*), compare_dist);
+  clock_t sort_end = clock();
+  float sort_tot_time = (float)(sort_end - sort_start) / CLOCKS_PER_SEC;
+
   for (int i = 0; i < kHashTableSize; ++i) {
     if (hash_table[i] != NULL) {
       print_dist(*hash_table[i]);
     }
   }
+
+  printf("INFO. Algorithm time: %f s\n", alg_tot_time);
+  printf("INFO. Sorting time:   %f s\n", sort_tot_time);
 
   free(line_buffer);
   free(base_cells);
