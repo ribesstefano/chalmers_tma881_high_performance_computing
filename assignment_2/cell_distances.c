@@ -9,12 +9,16 @@
 #include <fcntl.h>
 #include <math.h>
 
+// TODO: Using fixed point representation is faster, but it doesn't produce a
+// nice (and expected) normal distribution of the distance counts, i.e. with
+// higher counts for the distance values in the middle of the possible range [0,
+// ~34.85].
 #ifndef USE_FIX_POINT_CELLS
 #define USE_FIX_POINT_CELLS
 #endif
 
 #ifndef FIX_POINT_FRAC_BITS
-#define FIX_POINT_FRAC_BITS 10
+#define FIX_POINT_FRAC_BITS 10 // 10 seems to be the sweet spot
 #endif
 
 const float fix2float_scaler = 1.0 / (float)(1 << FIX_POINT_FRAC_BITS);
@@ -230,119 +234,6 @@ inline int max(const int a, const int b) {
   return (a > b) ? a : b;
 }
 
-#ifndef TASK_SIZE
-#define TASK_SIZE 200
-#endif
-
-void mergeSortAux(int *X, int n, int *tmp) {
-   int i = 0;
-   int j = n/2;
-   int ti = 0;
-
-   while (i<n/2 && j<n) {
-      if (X[i] < X[j]) {
-         tmp[ti] = X[i];
-         ti++; i++;
-      } else {
-         tmp[ti] = X[j];
-         ti++; j++;
-      }
-   }
-   while (i<n/2) { /* finish up lower half */
-      tmp[ti] = X[i];
-      ti++; i++;
-   }
-   while (j<n) { /* finish up upper half */
-      tmp[ti] = X[j];
-      ti++; j++;
-   }
-   memcpy(X, tmp, n*sizeof(int));
-}
-
-void mergeSort(int *X, int n, int *tmp)
-{
-   if (n < 2) return;
-
-   #pragma omp task shared(X) if (n > TASK_SIZE)
-   mergeSort(X, n/2, tmp);
-
-   #pragma omp task shared(X) if (n > TASK_SIZE)
-   mergeSort(X+(n/2), n-(n/2), tmp + n/2);
-
-   #pragma omp taskwait
-   mergeSortAux(X, n, tmp);
-}
-
-void init(int *a, int size){
-   for(int i = 0; i < size; i++)
-       a[i] = 0;
-}
-
-void printArray(int *a, int size){
-   for(int i = 0; i < size; i++)
-       printf("%d ", a[i]);
-   printf("\n");
-}
-
-int isSorted(int *a, int size){
-   for(int i = 0; i < size - 1; i++)
-      if(a[i] > a[i + 1])
-        return 0;
-   return 1;
-}
-
-void free_table_entries(const int table_size, dist_t** hash_table) {
-  for (int i = 0; i < table_size; ++i) {
-    if (hash_table[i] != NULL) {
-      free(hash_table[i]);
-    }
-  }
-}
-
-
-// void countSort(char arr[])
-// {
-//     // The output character array that will have sorted arr
-//     char output[strlen(arr)];
-
-//     // Create a count array to store count of individual
-//     // characters and initialize count array as 0
-//     int count[RANGE + 1], i;
-//     memset(count, 0, sizeof(count));
-
-//     // Store count of each character
-//     for (i = 0; arr[i]; ++i)
-//         ++count[arr[i]];
-
-//     // Change count[i] so that count[i] now contains actual
-//     // position of this character in output array
-//     for (i = 1; i <= RANGE; ++i)
-//         count[i] += count[i - 1];
-
-//     // Build the output character array
-//     for (i = 0; arr[i]; ++i) {
-//         output[count[arr[i]] - 1] = arr[i];
-//         --count[arr[i]];
-//     }
-
-//     /*
-//      For Stable algorithm
-//      for (i = sizeof(arr)-1; i>=0; --i)
-//     {
-//         output[count[arr[i]]-1] = arr[i];
-//         --count[arr[i]];
-//     }
-
-//     For Logic : See implementation
-//     */
-
-//     // Copy the output array to arr, so that arr now
-//     // contains sorted characters
-//     for (i = 0; arr[i]; ++i)
-//         arr[i] = output[i];
-// }
-
-
 int main(int argc, char* const* argv) {
   /*
    * Performance goal:
@@ -398,12 +289,13 @@ int main(int argc, char* const* argv) {
    */
   fseek(fp, 0, SEEK_END); // Go to end of file
   const long int kNumCells = ftell(fp) / kBytesPerLine;
-
+  const int kNumDistances = kNumCells * kNumCells / 2 - kNumCells / 2;
+  // NOTE: The following +1 is for the counting sort algorithm.
+  const int kMaxNumDistances = 65536 + 1; // 2^16+1, all the representable ones
   const int kBlockSize = 256;
   const int kBlockSizeX = 128;
   const int kBlockSizeY = 128;
   int block_size_x, block_size_y;
-
   // Cell block-buffers
   cell_t* base_cells = (cell_t*)malloc(sizeof(cell_t) * kBlockSizeX);
   cell_t* block_cells = (cell_t*)malloc(sizeof(cell_t) * kBlockSizeY);
@@ -413,18 +305,13 @@ int main(int argc, char* const* argv) {
   for (int i = 0, j = 0; i < kBlockSizeX; ++i, j += kBlockSizeY) {
     block_distances[i] = block_d_entries + j;
   }
-  // Hash table to store and count the final distances
-  const int kHashTableSize = kNumCells * kNumCells / 2 - kNumCells / 2;
-  dist_t** hash_table = (dist_t**) malloc(sizeof(dist_t*) * kHashTableSize);
   // Line buffer for reading "large chunks" from file
   char* line_buffer = (char*)malloc(kBytesPerLine * max(kBlockSizeX, kBlockSizeY));
   /*
    * Main algorithm
    */
-  setvbuf(fp, NULL, _IONBF, BUFSIZ);
+  setvbuf(fp, NULL, _IONBF, BUFSIZ); // Using no buffering is slightly faster...
 
-  // NOTE: The +1 is for the counting sort algorithm.
-  const int kMaxNumDistances = 65536 + 1; // 2^16+1
   uint16_t* counts_global = (uint16_t*)malloc(sizeof(uint16_t) * kMaxNumDistances);
   memset(counts_global, 0, sizeof(uint16_t) * kMaxNumDistances);
 
@@ -433,12 +320,13 @@ int main(int argc, char* const* argv) {
   double file_rd_end = 0;
   double dist_calc_start = 0;
   double dist_calc_end = 0;
-  double update_table_start = 0;
-  double update_table_end = 0;
+  double update_counts_start = 0;
+  double update_counts_end = 0;
   double alg_start = omp_get_wtime();
 
-// #pragma omp parallel
-  for (int i = 0; i < kNumCells; i += kBlockSizeX) {
+  int i, j;
+// #pragma omp parallel private(j) // private(block_size_y, block_cells, line_buffer)
+  for (i = 0; i < kNumCells; i += kBlockSizeX) {
     /*
      * Read shared base cells (the columns):
      * 
@@ -447,21 +335,23 @@ int main(int argc, char* const* argv) {
      * 3. Read the file into a line buffer
      * 4. Parse the lines into cell entries
      */
-#pragma omp critical
+#pragma omp single
     {
-      block_size_x = min(i + kBlockSizeX, kNumCells) - i;
-      fseek(fp, i * kBytesPerLine, SEEK_SET);
-      fread(line_buffer, block_size_x * kBytesPerLine, 1, fp);
+#pragma omp critical
+      {
+        block_size_x = min(i + kBlockSizeX, kNumCells) - i;
+        fseek(fp, i * kBytesPerLine, SEEK_SET);
+        fread(line_buffer, block_size_x * kBytesPerLine, 1, fp);
+      }
+      parse_lines(block_size_x, line_buffer, base_cells);
     }
-    parse_lines(block_size_x, line_buffer, base_cells);
     /*
      * Scroll over all remaining cells starting from the current base (the rows)
      *
      * NOTE: Start from the next line/cell, since the distance of a cell with
      * itself is zero. To do so, j needs to be i+1.
      */
-// #pragma omp parallel // shared(m, p) private(base_cells, block_cells, line_buffer)
-    for (int j = i + 1; j < kNumCells; j += kBlockSizeY) {
+    for (j = i + 1; j < kNumCells; j += kBlockSizeY) {
       /*
        * Similarly as above, load all the file entries block-wise:
        * 
@@ -469,6 +359,9 @@ int main(int argc, char* const* argv) {
        * 2. Get the block boundary (to avoid reading "outside" the file)
        * 3. Read the file into a line buffer
        * 4. Parse the lines into cell entries
+       * 5. Compute distances in the block
+       * 6. Count local block distances
+       * 7. Update global counts of distances
        */
 #pragma omp critical
       {
@@ -490,7 +383,7 @@ int main(int argc, char* const* argv) {
        */
       dist_calc_start += omp_get_wtime();
       int ii, jj;
-#pragma omp parallel for private(ii, jj)
+// #pragma omp parallel for private(ii, jj)
       for (ii = 0; ii < block_size_x; ++ii) {
         for (jj = (j == i + 1) ? ii : 0; jj < block_size_y; ++jj) {
           block_distances[ii][jj] =
@@ -511,66 +404,30 @@ int main(int argc, char* const* argv) {
        * storing N*N-N/2 values in the hash table might actually consume more
        * than 0.125 MB.
        */
-#pragma omp parallel
-      {
-        uint16_t* counts_local = (uint16_t*)malloc(sizeof(uint16_t) * kMaxNumDistances);
-        memset(counts_local, 0, sizeof(uint16_t) * kMaxNumDistances);
-        for (ii = 0; ii < block_size_x; ++ii) {
-          for (jj = (j == i + 1) ? ii : 0; jj < block_size_y; ++jj) {
-            counts_local[block_distances[ii][jj]]++;
-          }
+      update_counts_start += omp_get_wtime();
+      uint16_t* counts_local = (uint16_t*)malloc(sizeof(uint16_t) * kMaxNumDistances);
+      memset(counts_local, 0, sizeof(uint16_t) * kMaxNumDistances);
+      for (ii = 0; ii < block_size_x; ++ii) {
+        for (jj = (j == i + 1) ? ii : 0; jj < block_size_y; ++jj) {
+          counts_local[block_distances[ii][jj]]++;
         }
+      }
 #pragma omp critical
+      {
         for (int k = 0; k < kMaxNumDistances; ++k) {
           counts_global[k] += counts_local[k];
         }
-        free(counts_local);
       }
-// #pragma omp parallel
-//       for (ii = 0; ii < block_size_x; ++ii) {
-//         uint16_t* counts_local = (uint16_t*)malloc(sizeof(uint16_t) * kMaxNumDistances);
-//         memset(counts_local, 0, sizeof(uint16_t) * kMaxNumDistances);
-//         for (jj = (j == i + 1) ? ii : 0; jj < block_size_y; ++jj) {
-//           counts_local[block_distances[ii][jj]]++;
-//         }
-// #pragma omp critical
-//         for (int k = 0; k < kMaxNumDistances; ++k) {
-//           counts_global[k] += counts_local[k];
-//         }
-//         free(counts_local);
-//       }
-
-      /*
-       * Update the hash table containing all distances found so far
-       */
-//       update_table_start += omp_get_wtime();
-// #pragma omp critical
-// // #pragma omp parallel for private(ii, jj) shared(hash_table)
-//       for (ii = 0; ii < block_size_x; ++ii) {
-//         for (jj = (j == i + 1) ? ii : 0; jj < block_size_y; ++jj) {
-//           // update_dist(kHashTableSize, block_distances[ii][jj], hash_table);
-
-//           int hash_index;
-//           dist_t* found_dist = search_table(kHashTableSize, block_distances[ii][jj], hash_table, &hash_index);
-//           if (found_dist) {
-//             found_dist->count++;
-//           } else {
-//             hash_table[hash_index] = (dist_t*)malloc(sizeof(dist_t));
-//             hash_table[hash_index]->val = block_distances[ii][jj];
-//             hash_table[hash_index]->count = 1;
-//           }
-
-//         }
-//       }
-//       update_table_end += omp_get_wtime();
-
-      ++tot_iter;
+      free(counts_local);
+      update_counts_end += omp_get_wtime();
+      ++tot_iter; // Just for profiling purposes...
     } // end row-scrolling
   }
   double alg_end = omp_get_wtime();
   double alg_tot_time = alg_end - alg_start;
 
   int total_sum = 0;
+  double sort_start = omp_get_wtime();
   for (int i = 0; i < kMaxNumDistances; ++i) {
     if (counts_global[i] != 0) {
       float dist = (float)i * fix2float_scaler;
@@ -579,50 +436,21 @@ int main(int argc, char* const* argv) {
       total_sum += counts_global[i];
     }
   }
-  printf("INFO. Total/expected sum: %d / %d (diff: %d)\n", total_sum, kHashTableSize, total_sum - kHashTableSize);
-
-  // int16_t* counts_copy = (int16_t*)malloc(sizeof(int16_t) * kMaxNumDistances);
-  // memcpy(counts_copy, counts_global, sizeof(int16_t) * kMaxNumDistances);
-  // for(int i = 1; i < kMaxNumDistances; ++i) {
-  //   counts_copy[i] += counts_copy[i - 1];
-  // }
-
-  // Sort hash table and finally print
-  double sort_start = omp_get_wtime();
-  // qsort(hash_table, kHashTableSize, sizeof(dist_t*), compare_dist);
   double sort_end = omp_get_wtime();
   double sort_tot_time = sort_end - sort_start;
-
-  // for (int i = 0; i < kHashTableSize; ++i) {
-  //   if (hash_table[i] != NULL) {
-  //     print_dist(*hash_table[i]);
-  //   }
-  // }
   // Print out statistics
-  printf("INFO. Algorithm time: %f s\n", alg_tot_time);
-  printf("INFO. Dist calc time: %f s\n", (dist_calc_end - dist_calc_start) / tot_iter);
-  printf("INFO. Update table t: %f s\n", (update_table_end - update_table_start) / tot_iter);
-  printf("INFO. File read time: %f s\n", (file_rd_end - file_rd_start) / tot_iter);
-  printf("INFO. Sorting time:   %f s\n", sort_tot_time);
+  printf("INFO. Total/expected sum: %d / %d (diff: %d)\n", total_sum, kNumDistances, total_sum - kNumDistances);
+  printf("INFO. Algorithm time:  %f s\n", alg_tot_time);
+  printf("INFO. Dist calc time:  %f s\n", (dist_calc_end - dist_calc_start) / tot_iter);
+  printf("INFO. Update counts t: %f s\n", (update_counts_end - update_counts_start) / tot_iter);
+  printf("INFO. File read time:  %f s\n", (file_rd_end - file_rd_start) / tot_iter);
+  printf("INFO. Sorting time:    %f s\n", sort_tot_time);
   // Free all allocated memory
   free(line_buffer);
   free(base_cells);
   free(block_cells);
   free(block_distances);
   free(block_d_entries);
-  // NOTE: Special care is needed to free the elements in the hash table
-  free_table_entries(kHashTableSize, hash_table);
-  free(hash_table);
-
   fclose(fp);
-
-  int16_t x = (int16_t)(float)(9.0  * 0.5 + 9.0  * 0.25);
-  uint16_t max_fract = 0b1111111111111111;
-  float y = (float)max_fract / (1 << 2);
-
-  printf("%f\n", (int)max_fract * 4. / (1024. * 1024.));
-  printf("max fixed: %f\n", y);
-  printf("max dist:  %f\n", sqrt(20 * 20 + 20 * 20 + 20 * 20));
-
   return 0;
 }
