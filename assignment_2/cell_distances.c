@@ -499,6 +499,11 @@ int main(int argc, char* const* argv) {
        * TODO: IMPLEMENT A PARALLEL "COUNTING SORT" OVER THE BLOCK!
        * =======================================================================
        * Ref: https://www.journaldev.com/42355/counting-sort-algorithm
+       *
+       * Idea: If we encode ALL possible 16-bit distance values, each paired
+       * with a 16-bit counter, then we will consume around 0.25 MB. In fact, we
+       * are anyway truncating the distances, so storing N*N-N/2 values in the
+       * hash table might actually consume more than 0.25MB.
        */
 #pragma omp parallel
       {
@@ -587,11 +592,12 @@ int main(int argc, char* const* argv) {
   fclose(fp);
 
   int16_t x = (int16_t)(float)(9.0  * 0.5 + 9.0  * 0.25);
-  int16_t max_fract = 6;
-  float y = (float)max_fract / (1 << 3);
+  uint16_t max_fract = 0b1111111111111111;
+  float y = (float)max_fract / (1 << 2);
 
-  printf("%x\n", x);
-  printf("%f\n", y);
+  printf("%f\n", (int)max_fract * 4. / (1024. * 1024.));
+  printf("max fixed: %f\n", y);
+  printf("max dist:  %f\n", sqrt(20 * 20 + 20 * 20 + 20 * 20));
 
   return 0;
 }
