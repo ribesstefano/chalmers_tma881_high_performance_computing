@@ -8,6 +8,7 @@
 #include <stdint.h>
 #include <fcntl.h>
 #include <math.h>
+#include <getopt.h>
 
 // TODO: Using fixed point representation is faster, but it doesn't produce a
 // nice (and expected) normal distribution of the distance counts, i.e. with

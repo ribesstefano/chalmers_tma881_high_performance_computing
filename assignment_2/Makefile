@@ -7,13 +7,10 @@ EXECS = $(patsubst %.c, %.exe, $(SOURCES))
 
 .PHONY: all
 
-all: $(EXECS)
+all: cell_distances
 
-cell_distances.exe: cell_distances.c
-	$(CXX) $(CFLAGS) -O3 -march=x86-64 $< -o cell_distances.exe $(LDFLAGS)
-
-hash_table.exe: hash_table.c
-	$(CXX) $(CFLAGS) -O2 -march=x86-64 $< -o hash_table.exe $(LDFLAGS)
+cell_distances: cell_distances.c
+	$(CXX) $(CFLAGS) -O3 -march=x86-64 $< -o cell_distances $(LDFLAGS)
 
 clean:
-	rm -rf *.exe *.o *.s
+	rm -rf *.exe *.o *.s ./cell_distances
