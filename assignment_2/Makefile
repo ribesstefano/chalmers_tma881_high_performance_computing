@@ -1,5 +1,5 @@
 CXX := gcc
-CFLAGS := -std=gnu99 -fopenmp
+CFLAGS := -std=c17 -fopenmp
 LDFLAGS = -lm
 
 SOURCES = $(wildcard *.c)
