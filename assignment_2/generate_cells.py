@@ -19,8 +19,8 @@ def main():
                         dest='num_cells', default=1000,
                         help='Number of cells to generate. Default: 1000')
     parser.add_argument('-f', '--filename', dest='filename',
-                        default='cells.txt',
-                        help='Output filename. Default: cells.txt')
+                        default='cells',
+                        help='Output filename. Default: cells')
     parser.add_argument('-d', '--default', dest='default',
                         action='store_true',
                         default=False,
