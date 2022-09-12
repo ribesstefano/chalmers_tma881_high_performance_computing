@@ -11,7 +11,7 @@
 #include <getopt.h>
 
 #ifndef DEBUG_PRINT
-#define DEBUG_PRINT
+// #define DEBUG_PRINT
 #endif
 
 // TODO: Using fixed point representation is faster, but it doesn't produce a
@@ -115,47 +115,26 @@ inline void parse_lines(const int num_lines, char* line_buffer, cell_t* cells) {
   }
 }
 
-#ifndef USE_FIX_POINT_CELLS
-inline float cell2float(const cell_t a, const char dim) {
-  float ret = 0;
-  switch (dim) {
-    case 'x':
-      ret = (float)a.x_int + (float)a.x_dec * 0.001;
-      break;
-    case 'y':
-      ret = (float)a.y_int + (float)a.y_dec * 0.001;
-      break;
-    case 'z':
-      ret = (float)a.z_int + (float)a.z_dec * 0.001;
-      break;
-    default:
-      ret = (float)a.x_int + (float)a.x_dec * 0.001;
-      break;
-  }
-  return ret;
-}
-#endif
-
 inline float cell_dist(const cell_t a, const cell_t b) {
 #ifdef USE_FIX_POINT_CELLS
-  fix_t x_diff = a.x - b.x;
-  fix_t y_diff = a.y - b.y;
-  fix_t z_diff = a.z - b.z;
-  ufixd_t x_pow = (fixd_t)x_diff * (fixd_t)x_diff;
-  ufixd_t y_pow = (fixd_t)y_diff * (fixd_t)y_diff;
-  ufixd_t z_pow = (fixd_t)z_diff * (fixd_t)z_diff;
-  ufixd_t sum_fix = x_pow + y_pow + z_pow;
-  float sum = (float)sum_fix * (1.0 / (float)(1 << (FIX_POINT_FRAC_BITS * 2)));
-  return sqrt(sum);
+  // fix_t x_diff = a.x - b.x;
+  // fix_t y_diff = a.y - b.y;
+  // fix_t z_diff = a.z - b.z;
+  // ufixd_t x_pow = (fixd_t)x_diff * (fixd_t)x_diff;
+  // ufixd_t y_pow = (fixd_t)y_diff * (fixd_t)y_diff;
+  // ufixd_t z_pow = (fixd_t)z_diff * (fixd_t)z_diff;
+  // ufixd_t sum_fix = x_pow + y_pow + z_pow;
+  // float sum = (float)sum_fix * (1.0 / (float)(1 << (FIX_POINT_FRAC_BITS * 2)));
+  // return sqrt(sum);
 
-  // float x_diff = fix2float(a.x) - fix2float(b.x);
-  // float y_diff = fix2float(a.y) - fix2float(b.y);
-  // float z_diff = fix2float(a.z) - fix2float(b.z);
-  // return sqrt((x_diff * x_diff) + (y_diff * y_diff) + (z_diff * z_diff));
+  float x_diff = fix2float(a.x) - fix2float(b.x);
+  float y_diff = fix2float(a.y) - fix2float(b.y);
+  float z_diff = fix2float(a.z) - fix2float(b.z);
+  return sqrt((x_diff * x_diff) + (y_diff * y_diff) + (z_diff * z_diff));
 #else
-  float x_diff = cell2float(a, 'x') - cell2float(b, 'x');
-  float y_diff = cell2float(a, 'y') - cell2float(b, 'y');
-  float z_diff = cell2float(a, 'z') - cell2float(b, 'z');
+  float x_diff = (float)(a.x_int - b.x_int) + (float)(a.x_dec - b.x_dec) * 0.001;
+  float y_diff = (float)(a.y_int - b.y_int) + (float)(a.y_dec - b.y_dec) * 0.001;
+  float z_diff = (float)(a.z_int - b.z_int) + (float)(a.z_dec - b.z_dec) * 0.001;
   return sqrt((x_diff * x_diff) + (y_diff * y_diff) + (z_diff * z_diff));
 #endif
 }
@@ -222,8 +201,11 @@ int main(int argc, char* const* argv) {
   // const int kMaxNumDistances = (1 << (sizeof(fix_t) * 8)) - 1; // 2^N-1, all the representable ones
 
   // TODO: Which block size should I use?
-  const int kBlockSizeX = max(kNumCells * 0.1, 16);
-  const int kBlockSizeY = max(kNumCells * 0.1, 16);
+  // const int kBlockSizeX = max(kNumCells * 0.1, 16);
+  // const int kBlockSizeY = max(kNumCells * 0.1, 16);
+
+  const int kBlockSizeX = 512;
+  const int kBlockSizeY = 512;
   /*
    * Allocate dynamic arrays
    */
@@ -342,20 +324,21 @@ int main(int argc, char* const* argv) {
 #ifdef DEBUG_PRINT
   double print_start = omp_get_wtime();
 #endif
+  unsigned char str[5] = {0};
   for (ufix_t dist = 1; dist < kMaxNumDistances; ++dist) {
     if (counts[dist] != 0) {
       // NOTE: The format on the left side of the dot specifies the total number
       // of characters to use for the printout.
       // printf("%05.2f %d\n", ufix2float(dist), counts[dist]);
 
-      unsigned char str[5] = {0};
       str[4] = dist % 10 + kASCII_Char2Int;
       str[3] = (dist / 10) % 10 + kASCII_Char2Int;
       str[2] = '.';
-      str[1] = (dist / 10 / 10) % 10 + kASCII_Char2Int;
-      str[0] = (dist / 10 / 10 / 10) % 10 + kASCII_Char2Int;
-      if (strcmp(str, "00.00") != 0) {
+      str[1] = (dist / 100) % 10 + kASCII_Char2Int;
+      str[0] = (dist / 1000) % 10 + kASCII_Char2Int;
+
         printf("%s %d\n", str, counts[dist]);
+      if (strcmp(str, "00.00") != 0) {
       }
     }
   }

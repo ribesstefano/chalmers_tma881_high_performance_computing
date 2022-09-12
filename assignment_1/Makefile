@@ -1,5 +1,5 @@
 CXX := gcc
-CFLAGS := -std=gnu99
+CFLAGS := -std=c17
 
 SOURCES = $(wildcard *.c)
 EXECS = $(patsubst %.c, %.exe, $(SOURCES))
@@ -21,6 +21,14 @@ naive_benchmark.exe: naive_benchmark.c
 
 valgrind_test.exe: valgrind_test.c
 	$(CXX) $(CFLAGS) -O0 -g $< -o $@
+
+valgrind: valgrind_test.exe
+	valgrind --leak-check=full \
+	         --show-leak-kinds=all \
+	         --track-origins=yes \
+	         --verbose \
+	         --log-file=valgrind-out.txt \
+	         ./valgrind_test.exe
 
 gdb_test.exe: gdb_test.c
 	$(CXX) $(CFLAGS) -O0 -g $< -o $@
@@ -53,4 +61,4 @@ indirect_addressing.exe: indirect_addressing.c
 	$(CXX) $(CFLAGS) -O2 -march=x86-64 $< -o indirect_addressing_O2arch.exe
 
 clean:
-	rm -rf *.exe *.o *.s
+	rm -rf *.exe *.o *.s valgrind-out.txt*

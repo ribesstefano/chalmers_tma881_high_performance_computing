@@ -16,7 +16,10 @@ compress:
 	tar -czvf submission.tar.gz Makefile cell_distances.c
 
 test: compress
-	python3 ../reference_code/cell_distances/check_submission.py submission.tar.gz
+	rm -rf distances extracted
+	python3 /home/hpc2022/cell_distances/check_submission.py submission.tar.gz
+	# python3 ../reference_code/cell_distances/check_submission.py submission.tar.gz
+	rm -rf distances extracted
 
 clean:
-	rm -rf *.exe *.o *.s ./cell_distances
+	rm -rf *.exe *.o *.s ./cell_distances submission* distances extracted
