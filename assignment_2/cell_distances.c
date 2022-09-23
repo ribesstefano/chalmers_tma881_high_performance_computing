@@ -44,12 +44,7 @@ typedef uint16_t ufix_t;
 typedef uint32_t ufixd_t;
 
 typedef struct {
-#ifdef USE_FIX_POINT_CELLS
   fix_t x, y, z;
-#else
-  signed char x_int, y_int, z_int;
-  fix_t x_dec, y_dec, z_dec;
-#endif
 } cell_t;
 
 inline int min(const int a, const int b) {
@@ -74,15 +69,20 @@ inline float ufix2float(const ufix_t x) {
   return (float)x / (float)(1 << FIX_POINT_FRAC_BITS);
 }
 
-inline void parse_number(const char* line_str, signed char* intp, fix_t* decp) {
+inline fix_t parse_number_string(const char* line_str) {
   // Example line: "-04.238 -07.514 +08.942"
-  *intp = line_str[2] + line_str[1] * 10;
-  *decp = line_str[6] + line_str[5] * 10 + line_str[4] * 100;
+  fix_t intp;
+  fix_t decp;
   if (line_str[0] + kASCII_Char2Int == '-') {
-    *intp = - (*intp);
-    *decp = - (*decp);
+    intp = -(line_str[2] + line_str[1] * 10) * 1000;
+    decp = -(line_str[6] + line_str[5] * 10 + line_str[4] * 100);
+  } else {
+    intp = (line_str[2] + line_str[1] * 10) * 1000;
+    decp = (line_str[6] + line_str[5] * 10 + line_str[4] * 100);
   }
+  return intp + decp;
 }
+
 
 inline fix_t char2fix(const unsigned char* str) {
   // Expected string example: "-04.238 ", 8 Bytes
@@ -108,34 +108,25 @@ inline void parse_lines(const int num_lines, char* line_buffer, cell_t* cells) {
     cells[cx].y = char2fix(&line_buffer[i + kBytesPerCell]);
     cells[cx].z = char2fix(&line_buffer[i + 2 * kBytesPerCell]);
 #else
-    parse_number(&line_buffer[i], &cells[cx].x_int, &cells[cx].x_dec);
-    parse_number(&line_buffer[i + kBytesPerCell], &cells[cx].y_int, &cells[cx].y_dec);
-    parse_number(&line_buffer[i + 2 * kBytesPerCell], &cells[cx].z_int, &cells[cx].z_dec);
+    cells[cx].x = parse_number_string(&line_buffer[i]);
+    cells[cx].y = parse_number_string(&line_buffer[i + kBytesPerCell]);
+    cells[cx].z = parse_number_string(&line_buffer[i + 2 * kBytesPerCell]);
 #endif
   }
 }
 
 inline float cell_dist(const cell_t a, const cell_t b) {
 #ifdef USE_FIX_POINT_CELLS
-  // fix_t x_diff = a.x - b.x;
-  // fix_t y_diff = a.y - b.y;
-  // fix_t z_diff = a.z - b.z;
-  // ufixd_t x_pow = (fixd_t)x_diff * (fixd_t)x_diff;
-  // ufixd_t y_pow = (fixd_t)y_diff * (fixd_t)y_diff;
-  // ufixd_t z_pow = (fixd_t)z_diff * (fixd_t)z_diff;
-  // ufixd_t sum_fix = x_pow + y_pow + z_pow;
-  // float sum = (float)sum_fix * (1.0 / (float)(1 << (FIX_POINT_FRAC_BITS * 2)));
-  // return sqrt(sum);
-
   float x_diff = fix2float(a.x) - fix2float(b.x);
   float y_diff = fix2float(a.y) - fix2float(b.y);
   float z_diff = fix2float(a.z) - fix2float(b.z);
-  return sqrt((x_diff * x_diff) + (y_diff * y_diff) + (z_diff * z_diff));
+  return sqrtf((x_diff * x_diff) + (y_diff * y_diff) + (z_diff * z_diff));
 #else
-  float x_diff = (float)(a.x_int - b.x_int) + (float)(a.x_dec - b.x_dec) * 0.001;
-  float y_diff = (float)(a.y_int - b.y_int) + (float)(a.y_dec - b.y_dec) * 0.001;
-  float z_diff = (float)(a.z_int - b.z_int) + (float)(a.z_dec - b.z_dec) * 0.001;
-  return sqrt((x_diff * x_diff) + (y_diff * y_diff) + (z_diff * z_diff));
+  return sqrtf(
+    ((a.x - b.x) * (a.x - b.x) +
+     (a.y - b.y) * (a.y - b.y) +
+     (a.z - b.z) * (a.z - b.z)) * 0.01f
+  );
 #endif
 }
 
@@ -204,8 +195,8 @@ int main(int argc, char* const* argv) {
   // const int kBlockSizeX = max(kNumCells * 0.1, 16);
   // const int kBlockSizeY = max(kNumCells * 0.1, 16);
 
-  const int kBlockSizeX = 512;
-  const int kBlockSizeY = 512;
+  const int kBlockSizeX = 2048; // 2048 works for all but for "-t20"
+  const int kBlockSizeY = 2048; // 2048 works for all but for "-t20"
   /*
    * Allocate dynamic arrays
    */
@@ -222,8 +213,29 @@ int main(int argc, char* const* argv) {
   /*
    * Check if allocation successful
    */
-  if (!(base_cells && block_cells && block_d_entries && block_distances && line_buffer && counts)) {
-    fprintf(stderr, "ERROR. Error while allocating arrays. Exiting\n");
+  if (!base_cells) {
+    fprintf(stderr, "ERROR. Error while allocating 'base_cells'. Exiting\n");
+    exit(EXIT_FAILURE);
+  }
+  if (!block_cells) {
+    fprintf(stderr, "ERROR. Error while allocating 'block_cells'. Exiting\n");
+    exit(EXIT_FAILURE);
+  }
+  if (!block_d_entries) {
+    fprintf(stderr, "ERROR. Error while allocating 'block_d_entries'. Exiting\n");
+    exit(EXIT_FAILURE);
+  }
+  if (!block_distances) {
+    fprintf(stderr, "ERROR. Error while allocating 'block_distances'. Exiting\n");
+    exit(EXIT_FAILURE);
+  }
+  if (!line_buffer) {
+    fprintf(stderr, "ERROR. Error while allocating 'line_buffer'. Exiting\n");
+    exit(EXIT_FAILURE);
+  }
+  // if (!(base_cells && block_cells && block_d_entries && block_distances && line_buffer && counts)) {
+  if (!counts) {
+    fprintf(stderr, "ERROR. Error while allocating 'counts'. Exiting\n");
     exit(EXIT_FAILURE);
   }
   /*
@@ -236,7 +248,7 @@ int main(int argc, char* const* argv) {
    * Main algorithm
    */
   setvbuf(fp, NULL, _IONBF, BUFSIZ); // Using no buffering is slightly faster...
-#ifdef DEBUG_PRINT
+#if 0 // ifdef DEBUG_PRINT
   int tot_iter = 0;
   double file_rd_start = 0;
   double file_rd_end = 0;
@@ -282,11 +294,11 @@ int main(int argc, char* const* argv) {
       block_size_y = min(j + kBlockSizeY, kNumCells) - j;
       fseek(fp, j * kBytesPerLine, SEEK_SET);
       fread(line_buffer, block_size_y * kBytesPerLine, 1, fp);
-#ifdef DEBUG_PRINT
+#if 0 // ifdef DEBUG_PRINT
       file_rd_start += omp_get_wtime();
 #endif
       parse_lines(block_size_y, line_buffer, block_cells);
-#ifdef DEBUG_PRINT
+#if 0 // ifdef DEBUG_PRINT
       file_rd_end += omp_get_wtime();
       // Compute distances over the block (each entry can be computed
       // independently)
@@ -297,31 +309,31 @@ int main(int argc, char* const* argv) {
         for (jj = (j == i + 1) ? ii : 0; jj < block_size_y; ++jj) {
           block_distances[ii][jj] =
             // float2ufix(cell_dist(base_cells[ii], block_cells[jj]));
-            (ufix_t)trunc(100 * cell_dist(base_cells[ii], block_cells[jj]));
+            (ufix_t)(cell_dist(base_cells[ii], block_cells[jj]) + 0.5f);
         }
       }
-#ifdef DEBUG_PRINT
+#if 0 // ifdef DEBUG_PRINT
       dist_calc_end += omp_get_wtime();
 #endif
       // Update counts (single thread)
       for (ii = 0; ii < block_size_x; ++ii) {
         for (jj = (j == i + 1) ? ii : 0; jj < block_size_y; ++jj) {
-          counts[block_distances[ii][jj]]++;
+          ++counts[block_distances[ii][jj]];
         }
       }
-#ifdef DEBUG_PRINT
+#if 0 // ifdef DEBUG_PRINT
       tot_iter++;
 #endif
     }
   }
-#ifdef DEBUG_PRINT
+#if 0 // ifdef DEBUG_PRINT
   double alg_end = omp_get_wtime();
   double alg_tot_time = alg_end - alg_start;
 #endif
   /*
    * Print distance values and their counts to stdout.
    */
-#ifdef DEBUG_PRINT
+#if 0 // ifdef DEBUG_PRINT
   double print_start = omp_get_wtime();
 #endif
   unsigned char str[5] = {0};
@@ -337,13 +349,11 @@ int main(int argc, char* const* argv) {
       str[1] = (dist / 100) % 10 + kASCII_Char2Int;
       str[0] = (dist / 1000) % 10 + kASCII_Char2Int;
 
-        printf("%s %d\n", str, counts[dist]);
-      if (strcmp(str, "00.00") != 0) {
-      }
+      printf("%s %d\n", str, counts[dist]);
     }
   }
 
-#ifdef DEBUG_PRINT
+#if 0 // ifdef DEBUG_PRINT
   double print_end = omp_get_wtime();
   double print_tot_time = print_end - print_start;
   // Print out statistics
