@@ -10,10 +10,6 @@
 #include <math.h>
 #include <getopt.h>
 
-#ifndef DEBUG_PRINT
-// #define DEBUG_PRINT
-#endif
-
 // TODO: Using fixed point representation is faster, but it doesn't produce a
 // nice (and expected) normal distribution of the distance counts, i.e. with
 // higher counts for the distance values in the middle of the possible range [0,
@@ -39,9 +35,7 @@ const int kBytesPerCell = 8; // kBytesPerLine / 3;
 const char kASCII_Char2Int = 48;
 
 typedef int16_t fix_t;
-typedef int32_t fixd_t;
 typedef uint16_t ufix_t;
-typedef uint32_t ufixd_t;
 
 typedef struct {
   fix_t x, y, z;
@@ -99,11 +93,10 @@ inline void parse_lines(const int num_lines, char* line_buffer, cell_t* cells) {
     line_buffer[i] -= kASCII_Char2Int;
   }
 // #pragma omp parallel for private(i) shared(line_buffer, cells)
-  for (i = 0; i < num_lines * kBytesPerLine; i += kBytesPerLine) {
-    const int cx = i / kBytesPerLine;
-    cells[cx].x = char2fix(&line_buffer[i]);
-    cells[cx].y = char2fix(&line_buffer[i + kBytesPerCell]);
-    cells[cx].z = char2fix(&line_buffer[i + 2 * kBytesPerCell]);
+  for (i = 0; i < num_lines; ++i) {
+    cells[i].x = char2fix(&line_buffer[i * kBytesPerLine]);
+    cells[i].y = char2fix(&line_buffer[i * kBytesPerLine + kBytesPerCell]);
+    cells[i].z = char2fix(&line_buffer[i * kBytesPerLine + 2 * kBytesPerCell]);
   }
 }
 
