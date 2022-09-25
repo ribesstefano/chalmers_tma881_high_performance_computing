@@ -33,7 +33,7 @@
 #define FIX_POINT_FRAC_BITS 6 // 10 seems to be the sweet spot
 #endif
 
-const float fix2float_scaler = 1.0 / (float)(1 << FIX_POINT_FRAC_BITS);
+const float fix2float_scaler = 1.f / (float)(1 << FIX_POINT_FRAC_BITS);
 const int kBytesPerLine = 23 + 1; // 23 character plus the return char
 const int kBytesPerCell = 8; // kBytesPerLine / 3;
 const char kASCII_Char2Int = 48;
@@ -56,45 +56,43 @@ inline int max(const int a, const int b) {
 }
 
 inline ufix_t float2ufix(const float x) {
+#ifdef USE_FIX_POINT_CELLS
   return (ufix_t)(x * (1 << FIX_POINT_FRAC_BITS));
+#else
+  // NOTE: For truncating the value, we add 0.5 and convert to ufix
+  return (ufix_t)(x + 0.5f);
+#endif
 }
 
 inline float fix2float(const fix_t x) {
-  // return (float)x * fix2float_scaler;
-  return (float)x / (float)(1 << FIX_POINT_FRAC_BITS);
+  return (float)x * fix2float_scaler;
 }
 
-inline float ufix2float(const ufix_t x) {
-  // return (float)x * fix2float_scaler;
-  return (float)x / (float)(1 << FIX_POINT_FRAC_BITS);
-}
-
-inline fix_t parse_number_string(const char* line_str) {
-  // Example line: "-04.238 -07.514 +08.942"
-  fix_t intp;
-  fix_t decp;
-  if (line_str[0] + kASCII_Char2Int == '-') {
-    intp = -(line_str[2] + line_str[1] * 10) * 1000;
-    decp = -(line_str[6] + line_str[5] * 10 + line_str[4] * 100);
-  } else {
-    intp = (line_str[2] + line_str[1] * 10) * 1000;
-    decp = (line_str[6] + line_str[5] * 10 + line_str[4] * 100);
-  }
-  return intp + decp;
-}
-
-
-inline fix_t char2fix(const unsigned char* str) {
-  // Expected string example: "-04.238 ", 8 Bytes
+inline fix_t char2fix(const char* str) {
+  // Expected 8 Bytes string: "-04.238 "
+#ifdef USE_FIX_POINT_CELLS
   // NOTE: We are comparing against the offsetted '+' char because we offsetted
   // all the characters in `parse_lines()` function.
   const bool is_positive = str[0] + kASCII_Char2Int == '+';
-  const fix_t fix = ((str[1] * 10 + str[2]) << FIX_POINT_FRAC_BITS) + (str[4] >> 1) + (str[5] >> 2) + (str[6] >> 3);
+  const fix_t fix = ((str[1] * 10 + str[2]) << FIX_POINT_FRAC_BITS) +
+                    (str[4] >> 1) + (str[5] >> 2) + (str[6] >> 3);
   return is_positive ? fix : -fix;
+#else
+  fix_t intp;
+  fix_t decp;
+  if (str[0] + kASCII_Char2Int == '-') {
+    intp = -(str[2] + str[1] * 10) * 1000;          // Integer part (scaled)
+    decp = -(str[6] + str[5] * 10 + str[4] * 100);  // Decimal part
+  } else {
+    intp = (str[2] + str[1] * 10) * 1000;           // Integer part (scaled)
+    decp = (str[6] + str[5] * 10 + str[4] * 100);   // Decimal part
+  }
+  return intp + decp;
+#endif
 }
 
 inline void parse_lines(const int num_lines, char* line_buffer, cell_t* cells) {
-  // Example line: "-04.238 -07.514 +08.942"
+  // Expected line like: "-04.238 -07.514 +08.942"
   int i;
 // #pragma omp parallel for private(i) shared(line_buffer, cells)
   for (i = 0; i < num_lines * kBytesPerLine; ++i) {
@@ -103,15 +101,9 @@ inline void parse_lines(const int num_lines, char* line_buffer, cell_t* cells) {
 // #pragma omp parallel for private(i) shared(line_buffer, cells)
   for (i = 0; i < num_lines * kBytesPerLine; i += kBytesPerLine) {
     const int cx = i / kBytesPerLine;
-#ifdef USE_FIX_POINT_CELLS
     cells[cx].x = char2fix(&line_buffer[i]);
     cells[cx].y = char2fix(&line_buffer[i + kBytesPerCell]);
     cells[cx].z = char2fix(&line_buffer[i + 2 * kBytesPerCell]);
-#else
-    cells[cx].x = parse_number_string(&line_buffer[i]);
-    cells[cx].y = parse_number_string(&line_buffer[i + kBytesPerCell]);
-    cells[cx].z = parse_number_string(&line_buffer[i + 2 * kBytesPerCell]);
-#endif
   }
 }
 
@@ -137,20 +129,6 @@ int main(int argc, char* const* argv) {
    * Number of points            1e4   1e5   1e5   1e5
    * Number of threads           1     5     10    20
    * Maximal runtime in seconds  0.33  10.3  5.40  2.88
-   * 
-   * Max number of cells: 2^32 = 4,294,967,296
-   * Max number of distances: 2^64 = 1.8446744e+19
-   * Max number of allocated cells at the time: 582,542
-   * Max number of allocated distances (4+4 bytes per element):  655,360
-   * Max number of allocated distances (4 bytes per element): 1,310,720
-   * 
-   * c1  c2  c3  ... cN
-   * c2  0   d23 ... d2N
-   * c3  d32 0   ... d3N
-   * .
-   * .
-   * .
-   * cN  dN2
    */
   srand(time(NULL));
   int opt;
@@ -189,14 +167,9 @@ int main(int argc, char* const* argv) {
   const long int kNumCells = ftell(fp) / kBytesPerLine;
   const int kNumDistances = kNumCells * kNumCells / 2 - kNumCells / 2;
   const int kMaxNumDistances = 3465+1;
-  // const int kMaxNumDistances = (1 << (sizeof(fix_t) * 8)) - 1; // 2^N-1, all the representable ones
-
-  // TODO: Which block size should I use?
-  // const int kBlockSizeX = max(kNumCells * 0.1, 16);
-  // const int kBlockSizeY = max(kNumCells * 0.1, 16);
-
   const int kBlockSizeX = 2048; // 2048 works for all but for "-t20"
   const int kBlockSizeY = 2048; // 2048 works for all but for "-t20"
+  const int kBufferSize = max(kBlockSizeX, kBlockSizeY);
   /*
    * Allocate dynamic arrays
    */
@@ -207,7 +180,7 @@ int main(int argc, char* const* argv) {
   ufix_t* block_d_entries = (ufix_t*)malloc(sizeof(ufix_t) * kBlockSizeX * kBlockSizeY);
   ufix_t** block_distances = (ufix_t**)malloc(sizeof(ufix_t*) * kBlockSizeX);
   // Line buffer for reading "large chunks" from file
-  unsigned char* line_buffer = (unsigned char*)malloc(kBytesPerLine * max(kBlockSizeX, kBlockSizeY));
+  char* line_buffer = (char*)malloc(kBytesPerLine * kBufferSize);
   // Distance counts, indexed by the distance values themselves
   uint32_t* counts = (uint32_t*)calloc(sizeof(uint32_t), kMaxNumDistances);
   /*
@@ -233,7 +206,6 @@ int main(int argc, char* const* argv) {
     fprintf(stderr, "ERROR. Error while allocating 'line_buffer'. Exiting\n");
     exit(EXIT_FAILURE);
   }
-  // if (!(base_cells && block_cells && block_d_entries && block_distances && line_buffer && counts)) {
   if (!counts) {
     fprintf(stderr, "ERROR. Error while allocating 'counts'. Exiting\n");
     exit(EXIT_FAILURE);
@@ -248,16 +220,6 @@ int main(int argc, char* const* argv) {
    * Main algorithm
    */
   setvbuf(fp, NULL, _IONBF, BUFSIZ); // Using no buffering is slightly faster...
-#if 0 // ifdef DEBUG_PRINT
-  int tot_iter = 0;
-  double file_rd_start = 0;
-  double file_rd_end = 0;
-  double dist_calc_start = 0;
-  double dist_calc_end = 0;
-  double update_counts_start = 0;
-  double update_counts_end = 0;
-  double alg_start = omp_get_wtime();
-#endif
   int i, j, ii, jj;
   int block_size_x, block_size_y;
   for (i = 0; i < kNumCells; i += kBlockSizeX) {
@@ -294,76 +256,40 @@ int main(int argc, char* const* argv) {
       block_size_y = min(j + kBlockSizeY, kNumCells) - j;
       fseek(fp, j * kBytesPerLine, SEEK_SET);
       fread(line_buffer, block_size_y * kBytesPerLine, 1, fp);
-#if 0 // ifdef DEBUG_PRINT
-      file_rd_start += omp_get_wtime();
-#endif
       parse_lines(block_size_y, line_buffer, block_cells);
-#if 0 // ifdef DEBUG_PRINT
-      file_rd_end += omp_get_wtime();
-      // Compute distances over the block (each entry can be computed
-      // independently)
-      dist_calc_start += omp_get_wtime();
-#endif
+      // Compute distances in parallel: each entry in the block is independent
 #pragma omp parallel for private(ii, jj) shared(i, j, block_distances, base_cells, block_cells)
       for (ii = 0; ii < block_size_x; ++ii) {
         for (jj = (j == i + 1) ? ii : 0; jj < block_size_y; ++jj) {
           block_distances[ii][jj] =
-            // float2ufix(cell_dist(base_cells[ii], block_cells[jj]));
-            (ufix_t)(cell_dist(base_cells[ii], block_cells[jj]) + 0.5f);
+            float2ufix(cell_dist(base_cells[ii], block_cells[jj]));
         }
       }
-#if 0 // ifdef DEBUG_PRINT
-      dist_calc_end += omp_get_wtime();
-#endif
       // Update counts (single thread)
       for (ii = 0; ii < block_size_x; ++ii) {
         for (jj = (j == i + 1) ? ii : 0; jj < block_size_y; ++jj) {
           ++counts[block_distances[ii][jj]];
         }
       }
-#if 0 // ifdef DEBUG_PRINT
-      tot_iter++;
-#endif
     }
   }
-#if 0 // ifdef DEBUG_PRINT
-  double alg_end = omp_get_wtime();
-  double alg_tot_time = alg_end - alg_start;
-#endif
   /*
    * Print distance values and their counts to stdout.
    */
-#if 0 // ifdef DEBUG_PRINT
-  double print_start = omp_get_wtime();
-#endif
   unsigned char str[5] = {0};
   for (ufix_t dist = 1; dist < kMaxNumDistances; ++dist) {
     if (counts[dist] != 0) {
       // NOTE: The format on the left side of the dot specifies the total number
       // of characters to use for the printout.
       // printf("%05.2f %d\n", ufix2float(dist), counts[dist]);
-
       str[4] = dist % 10 + kASCII_Char2Int;
       str[3] = (dist / 10) % 10 + kASCII_Char2Int;
       str[2] = '.';
       str[1] = (dist / 100) % 10 + kASCII_Char2Int;
       str[0] = (dist / 1000) % 10 + kASCII_Char2Int;
-
       printf("%s %d\n", str, counts[dist]);
     }
   }
-
-#if 0 // ifdef DEBUG_PRINT
-  double print_end = omp_get_wtime();
-  double print_tot_time = print_end - print_start;
-  // Print out statistics
-  // printf("INFO. Total/expected sum: %d / %d (diff: %d)\n", total_sum, kNumDistances, total_sum - kNumDistances);
-  printf("INFO. Algorithm time:  %f s\n", alg_tot_time);
-  printf("INFO. Dist calc time:  %f s\n", (dist_calc_end - dist_calc_start) / tot_iter);
-  printf("INFO. Update counts t: %f s\n", (update_counts_end - update_counts_start) / tot_iter);
-  printf("INFO. File read time:  %f s\n", (file_rd_end - file_rd_start) / tot_iter);
-  printf("INFO. Printing time:   %f s\n", print_tot_time);
-#endif
   /*
    * Free all allocated memory
    */
