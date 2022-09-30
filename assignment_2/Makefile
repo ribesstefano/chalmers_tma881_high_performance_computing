@@ -20,7 +20,7 @@ link_cell_e5:
 	rm cells
 	ln -s /home/hpc2022/cell_distances/test_data/cell_e5 cells
 
-compress:
+compress: Makefile cell_distances.c
 	tar -czvf submission.tar.gz Makefile cell_distances.c
 
 debug: cell_distances link_cell_e4
@@ -29,10 +29,7 @@ debug: cell_distances link_cell_e4
 	perf report
 
 perf_e4: cell_distances link_cell_e4
-	hyperfine "./cell_distances -t1"
-# 	hyperfine --time-unit millisecond --warmup 1 --max-runs 1 "systemd-run --user --scope --property=MemoryMax=5M ./cell_distances -t1"
-# 	echo "Max allowed time:"
-# 	echo '2 * 0.29 * (1 + 10)' | bc -l
+	hyperfine --time-unit millisecond --warmup 1 --max-runs 10 "systemd-run --user --scope --property=MemoryMax=5M ./cell_distances -t1"
 
 perf_e5: cell_distances link_cell_e5
 	hyperfine  --time-unit millisecond --warmup 1 --max-runs 10 "systemd-run --user --scope --property=MemoryMax=5M ./cell_distances -t20"
@@ -40,8 +37,6 @@ perf_e5: cell_distances link_cell_e5
 check: compress
 	rm -rf distances extracted
 	python3 /home/hpc2022/cell_distances/check_submission.py submission.tar.gz
-	# python3 ../reference_code/cell_distances/check_submission.py submission.tar.gz
-	rm -rf distances extracted
 
 clean:
-	rm -rf *.exe *.o *.s ./cell_distances submission* distances extracted vgcore.* perf.data*
+	rm -rf *.exe *.o *.s ./cell_distances distances extracted submission* vgcore.* perf.data*

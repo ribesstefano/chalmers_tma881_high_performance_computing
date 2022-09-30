@@ -161,8 +161,8 @@ int main(int argc, char* const* argv) {
   const long int kNumCells = ftell(fp) / kBytesPerLine;
   const int kNumDistances = kNumCells * kNumCells / 2 - kNumCells / 2;
   const int kMaxNumDistances = 3465+1;
-  const int kBlockSizeX = 2048; // 2048 works for all but for "-t20"
-  const int kBlockSizeY = 2048; // 2048 works for all but for "-t20"
+  const int kBlockSizeX = 2048;
+  const int kBlockSizeY = 2048;
   const int kBufferSize = max(kBlockSizeX, kBlockSizeY);
   /*
    * Allocate dynamic arrays
@@ -170,9 +170,6 @@ int main(int argc, char* const* argv) {
   // Cell block-buffers
   cell_t* base_cells = (cell_t*)malloc(sizeof(cell_t) * kBlockSizeX);
   cell_t* block_cells = (cell_t*)malloc(sizeof(cell_t) * kBlockSizeY);
-  // Distance block-buffer
-  ufix_t* block_d_entries = (ufix_t*)malloc(sizeof(ufix_t) * kBlockSizeX * kBlockSizeY);
-  ufix_t** block_distances = (ufix_t**)malloc(sizeof(ufix_t*) * kBlockSizeX);
   // Line buffer for reading "large chunks" from file
   char* line_buffer = (char*)malloc(kBytesPerLine * kBufferSize);
   // Distance counts, indexed by the distance values themselves
@@ -188,14 +185,6 @@ int main(int argc, char* const* argv) {
     fprintf(stderr, "ERROR. Error while allocating 'block_cells'. Exiting\n");
     exit(EXIT_FAILURE);
   }
-  if (!block_d_entries) {
-    fprintf(stderr, "ERROR. Error while allocating 'block_d_entries'. Exiting\n");
-    exit(EXIT_FAILURE);
-  }
-  if (!block_distances) {
-    fprintf(stderr, "ERROR. Error while allocating 'block_distances'. Exiting\n");
-    exit(EXIT_FAILURE);
-  }
   if (!line_buffer) {
     fprintf(stderr, "ERROR. Error while allocating 'line_buffer'. Exiting\n");
     exit(EXIT_FAILURE);
@@ -203,12 +192,6 @@ int main(int argc, char* const* argv) {
   if (!counts) {
     fprintf(stderr, "ERROR. Error while allocating 'counts'. Exiting\n");
     exit(EXIT_FAILURE);
-  }
-  /*
-   * "Populate" 2D array
-   */
-  for (int i = 0, j = 0; i < kBlockSizeX; ++i, j += kBlockSizeY) {
-    block_distances[i] = block_d_entries + j;
   }
   /*
    * Main algorithm
@@ -255,26 +238,22 @@ int main(int argc, char* const* argv) {
       //
       // TODO: Check the false-sharing problem.
       //
-      // TODO: Do the accumulation in the inner-loop already via some special
+      // NOTE: Do the accumulation in the inner-loop already via some special
       // openmp properties over the count vector. In this way, the threads will
       // utilize a local copy that will be accumulated automatically in the end
       // In practice, it's gonna be faster having local copies on counts than
       // having looping over ~4M entries in a single loop afterwards.
       //
-      // TODO: Having local copies also saves a HUGE amount of memory. In fact,
+      // NOTE: Having local copies also saves a HUGE amount of memory. In fact,
       // the program doesn't meet the memory costraints requirements at the
       // moment.
-#pragma omp parallel for private(ii, jj) shared(i, j, block_distances, base_cells, block_cells)
+      // 
+      // NOTE: Using a reduction property is the key
+#pragma omp parallel for private(ii, jj) shared(i, j, base_cells, block_cells) \
+  reduction(+:counts[:kMaxNumDistances])
       for (ii = 0; ii < block_size_x; ++ii) {
         for (jj = (j == i + 1) ? ii : 0; jj < block_size_y; ++jj) {
-          block_distances[ii][jj] =
-            float2ufix(cell_dist(base_cells[ii], block_cells[jj]));
-        }
-      }
-      // Update counts (single thread)
-      for (ii = 0; ii < block_size_x; ++ii) {
-        for (jj = (j == i + 1) ? ii : 0; jj < block_size_y; ++jj) {
-          ++counts[block_distances[ii][jj]];
+          ++counts[float2ufix(cell_dist(base_cells[ii], block_cells[jj]))];
         }
       }
     }
@@ -302,8 +281,6 @@ int main(int argc, char* const* argv) {
   free(line_buffer);
   free(base_cells);
   free(block_cells);
-  free(block_distances);
-  free(block_d_entries);
   free(counts);
   fclose(fp);
   return 0;
