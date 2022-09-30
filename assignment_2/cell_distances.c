@@ -102,16 +102,17 @@ inline void parse_lines(const int num_lines, char* line_buffer, cell_t* cells) {
 
 inline float cell_dist(const cell_t a, const cell_t b) {
 #ifdef USE_FIX_POINT_CELLS
-  float x_diff = fix2float(a.x) - fix2float(b.x);
-  float y_diff = fix2float(a.y) - fix2float(b.y);
-  float z_diff = fix2float(a.z) - fix2float(b.z);
+  float x_diff = fix2float(a.x - b.x);
+  float y_diff = fix2float(a.y - b.y);
+  float z_diff = fix2float(a.z - b.z);
   return sqrtf((x_diff * x_diff) + (y_diff * y_diff) + (z_diff * z_diff));
 #else
-  return sqrtf(
-    ((a.x - b.x) * (a.x - b.x) +
-     (a.y - b.y) * (a.y - b.y) +
-     (a.z - b.z) * (a.z - b.z)) * 0.01f
-  );
+  // NOTE: The multiplication result must be placed on an extended result in
+  // order to not lose precision, i.e. going in underflow.
+  const int32_t x2 = (a.x - b.x) * (a.x - b.x);
+  const int32_t y2 = (a.y - b.y) * (a.y - b.y);
+  const int32_t z2 = (a.z - b.z) * (a.z - b.z);
+  return sqrtf((x2 + y2 + z2) * 0.01f);
 #endif
 }
 
@@ -251,6 +252,18 @@ int main(int argc, char* const* argv) {
       fread(line_buffer, block_size_y * kBytesPerLine, 1, fp);
       parse_lines(block_size_y, line_buffer, block_cells);
       // Compute distances in parallel: each entry in the block is independent
+      //
+      // TODO: Check the false-sharing problem.
+      //
+      // TODO: Do the accumulation in the inner-loop already via some special
+      // openmp properties over the count vector. In this way, the threads will
+      // utilize a local copy that will be accumulated automatically in the end
+      // In practice, it's gonna be faster having local copies on counts than
+      // having looping over ~4M entries in a single loop afterwards.
+      //
+      // TODO: Having local copies also saves a HUGE amount of memory. In fact,
+      // the program doesn't meet the memory costraints requirements at the
+      // moment.
 #pragma omp parallel for private(ii, jj) shared(i, j, block_distances, base_cells, block_cells)
       for (ii = 0; ii < block_size_x; ++ii) {
         for (jj = (j == i + 1) ? ii : 0; jj < block_size_y; ++jj) {
