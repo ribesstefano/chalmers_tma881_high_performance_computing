@@ -7,10 +7,13 @@ EXECS = $(patsubst %.c, %.exe, $(SOURCES))
 
 .PHONY: all
 
-all: newton
+all: newton multi_stage
 
 newton: newton.c
 	$(CXX) $(CFLAGS) -O3 -march=x86-64 $< -o newton $(LDFLAGS)
+
+multi_stage: multi_stage.c
+	$(CXX) $(CFLAGS) -O3 -march=x86-64 $< -o multi_stage $(LDFLAGS)
 
 images: SHELL:=/bin/bash
 images:
@@ -23,11 +26,15 @@ images:
 		ffmpeg -i "$$i" "`echo "$$i" | cut -d'.' -f1`.png" ; \
 	done
 
-compress:
+test: newton
+	./newton -t2 -l1000 5
+	$(MAKE) images
+
+compress: Makefile newton.c
 	tar -czvf submission.tar.gz Makefile newton.c
 
-test: compress
-	python3 ../reference_code/newton/check_submission.py submission.tar.gz
+check: compress
+	python3 ../reference_code/newton_iteration/check_submission.py submission.tar.gz
 
 clean:
-	rm -rf *.exe *.o *.s ./newton *.ppm *.png
+	rm -rf *.exe *.o *.s ./newton ./multi_stage *.ppm *.png extracted/ pictures/

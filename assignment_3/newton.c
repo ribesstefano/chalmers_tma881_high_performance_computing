@@ -25,6 +25,7 @@ atomic_int_least16_t next_idx = 0;
 
 const int kIterCutoff = 100;
 const double kEpsilon = 1e-3;
+const double kEpsilonSquared = 1e-6;
 const double kDivMinRe = -1e10;
 const double kDivMaxRe = 1e10;
 const double kDivMinIm = -1e10;
@@ -125,6 +126,17 @@ void get_filename(const int degree, const char* base, char* filename) {
   strcat(filename, ".ppm");
 }
 
+/**
+ * @brief      Squared complex absolute value of a complex number
+ *
+ * @param[in]  z  The complex number
+ *
+ * @return     The squared absolute value
+ */
+double csqabs(const double complex z) {
+  return creal(z) * creal(z) + cimag(z) * cimag(z);
+}
+
 attractor_t rootiter(double complex z) {
   attractor_t ret;
   ret.attr = (int)NAN;
@@ -136,14 +148,20 @@ attractor_t rootiter(double complex z) {
       ret.attr = degree;
       break;
     }
-    // TODO: The use of cabs() can be avoided.
-    if (cabs(z) < kEpsilon) {
+    // TODO: The use of cabs() can be avoided. Remember cabs() it's a norm
+    // operation, i.e. a distance calculation: |z| = sqrt(re^2 + im^2)
+    //
+    // For instance, I can avoid computing the root by comparing against a
+    // squared epsilon.
+    // if (cabs(z) < kEpsilon) {
+    if (csqabs(z) < kEpsilonSquared) {
       ret.attr = degree + 1;
     }
     // TODO: Julia implementation uses enumerate(), do we need to start from 1
     // then?
     for (int i = 0; i < degree; ++i) {
-      if (cabs(z - roots[i]) < kEpsilon) {
+      // if (cabs(z - roots[i]) < kEpsilon) {
+      if (csqabs(z - roots[i]) < kEpsilonSquared) {
         ret.attr = i;
         break;
       }
@@ -153,7 +171,39 @@ attractor_t rootiter(double complex z) {
     }
     // TODO: The function cpow() must be removed. A switch-case on the degree
     // can help improving/optimizing the computation
-    z = z * (1. - 1. / degree) + 1. / cpow(z, (degree - 1)) / degree;
+    // z = z * (1. - 1. / degree) + 1. / cpow(z, (degree - 1)) / degree;
+    switch (degree) {
+      case 1:
+        z = 1.;
+        break;
+      case 2:
+        z = z / 2 + 1. / z / 2;
+        break;
+      case 3:
+        z = z * (1. - 1. / 3) + 1. / (z * z) / 3;
+        break;
+      case 4:
+        z = z * (1. - 1. / 4) + 1. / (z * z * z) / 4;
+        break;
+      case 5:
+        z = z * (1. - 1. / 5) + 1. / (z * z * z * z) / 5;
+        break;
+      case 6:
+        z = z * (1. - 1. / 6) + 1. / (z * z * z * z * z) / 6;
+        break;
+      case 7:
+        z = z * (1. - 1. / 7) + 1. / (z * z * z * z * z * z) / 7;
+        break;
+      case 8:
+        z = z * (1. - 1. / 8) + 1. / (z * z * z * z * z * z * z) / 8;
+        break;
+      case 9:
+        z = z * (1. - 1. / 9) + 1. / (z * z * z * z * z * z * z * z) / 9;
+        break;
+      default:
+        z = z * (1. - 1. / degree) + 1. / cpow(z, (degree - 1)) / degree;
+        break;
+    }
     ret.iter++;
   }
   ret.iter = (ret.iter < kIterCutoff) ? ret.iter : kIterCutoff - 1;
@@ -164,6 +214,12 @@ int main(int argc, char* const* argv) {
   /*
    * The recommended implementation is in the video and an overview of the
    * algorithm can be found in the Julia reference implmentation.
+   *
+   * Example calls:
+   *
+   * ./newton -t2 -l1000 5
+   * ./newton -t5 -l1000 7
+   * ./newton -l1000 -t5 7
    */
   srand(time(NULL));
   int opt;
@@ -186,7 +242,7 @@ int main(int argc, char* const* argv) {
     exit(EXIT_FAILURE);
   }
   degree = atoi(argv[optind]);
-  if (degree < 0) {
+  if (degree <= 0) {
     fprintf(stderr, "ERROR. Degree must be positive. Supplied: %d. Exiting\n", degree);
     exit(EXIT_FAILURE);
   }
@@ -207,6 +263,7 @@ int main(int argc, char* const* argv) {
     exit(EXIT_FAILURE);
   }
 
+#if 0
   int r;
   smphr_t idx_smphr;
   smphr_init(kBlockSize, &idx_smphr);
@@ -217,7 +274,6 @@ int main(int argc, char* const* argv) {
   for (int tx = 0; tx < num_threads; ++tx) {
     thrd_args[tx].id = tx;
     thrd_args[tx].idx_smphr = &idx_smphr;
-    thrd_args[tx].thrd_smphr = &thrd_smphr;
     int r = thrd_create(&compute_threads[tx], compute_thread, (void*)(&thrd_args[tx]));
     if (r != thrd_success) {
       fprintf(stderr, "ERROR. Failed to create thread %d. Exiting.\n", tx);
@@ -244,8 +300,7 @@ int main(int argc, char* const* argv) {
 
   free(compute_threads);
   free(thrd_args);
-
-#if 0
+#else
   /*
    * Precompute roots
    */
@@ -316,8 +371,8 @@ int main(int argc, char* const* argv) {
    */
   fclose(attr_fp);
   fclose(iter_fp);
-  free(roots);
   free(attr_iters_entries);
   free(attr_iters);
+  free(roots);
 #endif
 }
