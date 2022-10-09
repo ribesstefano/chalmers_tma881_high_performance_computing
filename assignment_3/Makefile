@@ -31,10 +31,10 @@ test: newton
 	$(MAKE) images
 
 compress: Makefile newton.c
-	tar -czvf submission.tar.gz Makefile newton.c
+	tar -czvf submission.tar.gz Makefile newton.c c11threads.h
 
 check: compress
-	python3 ../reference_code/newton_iteration/check_submission.py submission.tar.gz
+	python3 ../../newton_iteration/check_submission.py submission.tar.gz
 
 clean:
 	rm -rf *.exe *.o *.s ./newton ./multi_stage *.ppm *.png extracted/ pictures/
