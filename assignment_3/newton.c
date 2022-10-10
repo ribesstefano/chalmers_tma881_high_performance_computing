@@ -105,10 +105,20 @@ inline void rootiter(double complex z, attr_t* attr_final, conv_t* conv_final) {
       attr = degree;
       break;
     }
-    if (is_below_threshold(zre, zim)) {
+
+    // if (is_below_threshold(zre, zim)) {
+    //   attr = degree + 1;
+    //   break;
+    // }
+    if (absd(zre) + absd(zim) < kEpsilon) {
       attr = degree + 1;
       break;
     }
+    if (zre * zre + zim * zim < kEpsilonSquared) {
+      attr = degree + 1;
+      break;
+    }
+
     // TODO: The square norm of a complex number is the sum of two squares. When
     // computing it for a difference x - x', how can one avoid computing twice
     // the difference of the respective real and imaginary parts?
