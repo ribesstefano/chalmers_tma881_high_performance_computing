@@ -100,12 +100,13 @@ void rootiter(double complex z, attr_t* attr, conv_t* conv) {
     }
     if (is_below_threshold(z)) {
       *attr = degree + 1;
+      break;
     }
     // TODO: Julia implementation uses enumerate(), do we need to start from 1
     // then?
     for (int i = 1; i <= degree; ++i) {
       if (is_below_threshold(z - roots[i])) {
-        *attr = i;
+        *attr = i - 1;
         break;
       }
     }
