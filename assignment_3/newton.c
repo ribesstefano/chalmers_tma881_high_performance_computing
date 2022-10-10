@@ -48,15 +48,16 @@ typedef struct {
   int id;
   int start_idx;
   int step;
+  int* computed_lines;
   double re_start_val;
   double im_start_val;
   double re_step;
   double im_step;
+  double complex* roots;
   mtx_t* mtx;
   cnd_t* cnd;
   attr_t** attractors;
   conv_t** convergences;
-  int* computed_lines;
 } thrd_args_t;
 
 inline double absd(const double x) {
@@ -74,28 +75,29 @@ inline bool is_below_threshold(double zre, double zim) {
   // * the square root can be avoided by comparing against a squared epsilon
   // double zre = creal(z);
   // double zim = cimag(z);
-  zre = (zre > 0) ? zre : -zre;
-  zim = (zim > 0) ? zim : -zim;
-  if (kEpsilon < zre) {
-    // printf("NOT using cabs^2\n");
-    return false;
-  }
-  if (kEpsilon < zim) {
-    // printf("NOT using cabs^2\n");
-    return false;
-  }
-  if (zre + zim < kEpsilon) {
-    // printf("NOT using cabs^2\n");
-    return true;
-  }
+  // zre = (zre > 0) ? zre : -zre;
+  // zim = (zim > 0) ? zim : -zim;
+  // if (kEpsilon < zre) {
+  //   // printf("NOT using cabs^2\n");
+  //   return false;
+  // }
+  // if (kEpsilon < zim) {
+  //   // printf("NOT using cabs^2\n");
+  //   return false;
+  // }
+  // if (zre + zim < kEpsilon) {
+  //   // printf("NOT using cabs^2\n");
+  //   return true;
+  // }
   // printf("using cabs^2\n");
   return zre * zre + zim * zim < kEpsilonSquared;
 }
 
-inline void rootiter(double complex z, attr_t* attr_final, conv_t* conv_final) {
+inline void rootiter(const double complex* roots_in, const double complex z_in, attr_t* attr_final, conv_t* conv_final) {
   const attr_t kAttrDefaultVal = 0; // (attr_t)NAN;
   attr_t attr = kAttrDefaultVal;
   conv_t conv = 0;
+  double complex z = z_in;
   // while(true) {
   while(conv < 50) {
     double zre = creal(z);
@@ -106,18 +108,18 @@ inline void rootiter(double complex z, attr_t* attr_final, conv_t* conv_final) {
       break;
     }
 
-    // if (is_below_threshold(zre, zim)) {
+    if (is_below_threshold(zre, zim)) {
+      attr = degree + 1;
+      break;
+    }
+    // if (absd(zre) + absd(zim) < kEpsilon) {
     //   attr = degree + 1;
     //   break;
     // }
-    if (absd(zre) + absd(zim) < kEpsilon) {
-      attr = degree + 1;
-      break;
-    }
-    if (zre * zre + zim * zim < kEpsilonSquared) {
-      attr = degree + 1;
-      break;
-    }
+    // if (zre * zre + zim * zim < kEpsilonSquared) {
+    //   attr = degree + 1;
+    //   break;
+    // }
 
     // TODO: The square norm of a complex number is the sum of two squares. When
     // computing it for a difference x - x', how can one avoid computing twice
@@ -125,26 +127,28 @@ inline void rootiter(double complex z, attr_t* attr_final, conv_t* conv_final) {
     // TODO: Julia implementation uses enumerate(), do we need to start from 1
     // then?
     for (int i = 0; i < degree; ++i) {
-      // if (is_below_threshold(zre_diff, zim_diff)) {
+      double zre_diff = zre - creal(roots_in[i]);
+      double zim_diff = zim - cimag(roots_in[i]);
+      if (is_below_threshold(zre_diff, zim_diff)) {
+        attr = i;
+        break;
+      }
+      // double zre_diff = zre - creal(roots_in[i]);
+      // if (kEpsilon < absd(zre_diff)) {
+      //   continue;
+      // }
+      // double zim_diff = zim - cimag(roots_in[i]);
+      // if (kEpsilon < absd(zim_diff)) {
+      //   continue;
+      // }
+      // if (absd(zre_diff) + absd(zim_diff) < kEpsilon) {
       //   attr = i;
       //   break;
       // }
-      double zre_diff = zre - creal(roots[i]);
-      if (kEpsilon < absd(zre_diff)) {
-        continue;
-      }
-      double zim_diff = zim - cimag(roots[i]);
-      if (kEpsilon < absd(zim_diff)) {
-        continue;
-      }
-      if (absd(zre_diff) + absd(zim_diff) < kEpsilon) {
-        attr = i;
-        break;
-      }
-      if (zre_diff * zre_diff + zim_diff * zim_diff < kEpsilonSquared) {
-        attr = i;
-        break;
-      }
+      // if (zre_diff * zre_diff + zim_diff * zim_diff < kEpsilonSquared) {
+      //   attr = i;
+      //   break;
+      // }
     }
     if (attr != kAttrDefaultVal) {
       break;
@@ -263,6 +267,7 @@ int smphr_acquire(smphr_t* smphr) {
 #endif
 
 int compute_thread(void* args_in) {
+  double complex* roots = (double complex*)malloc(degree * sizeof(double complex));
   attr_t* attractor = (attr_t*)malloc(num_lines * sizeof(attr_t));
   conv_t* convergence = (conv_t*)malloc(num_lines * sizeof(conv_t));
   // "Parse" arguments
@@ -274,6 +279,9 @@ int compute_thread(void* args_in) {
   const int start_idx = args->start_idx;
   const int istep = args->step;
   const int thread_id = args->id;
+  for (int i = 0; i < degree; ++i) {
+    roots[i] = args->roots[i];
+  }
   /*
    * Main loop
    */
@@ -282,7 +290,7 @@ int compute_thread(void* args_in) {
     // Start computation
     zre = args->re_start_val;
     for (int j = 0; j < num_lines; ++j, zre += re_step) {
-      rootiter(zre + zim * I, &attractor[j], &convergence[j]);
+      rootiter(roots, zre + zim * I, &attractor[j], &convergence[j]);
     }
     // Update global, i.e. shared, variables
     mtx_lock(args->mtx);
@@ -299,6 +307,7 @@ int compute_thread(void* args_in) {
   // Free local buffers
   free(attractor);
   free(convergence);
+  free(roots);
   return 0;
   // printf("Hello from thread n.%d\n", args->id);
   // int idx = smphr_acquire(args->idx_smphr);
@@ -437,9 +446,9 @@ int main(int argc, char* const* argv) {
    * Precompute roots
    */
   roots = (double complex*)malloc(degree * sizeof(double complex));
-  for (int i = 0; i < degree; ++i) {
-    roots[i] = cexp(2 * kPi * I * i / degree);
-    // printf("roots[%d] = %.2f %+.2fi\n", i, creal(roots[i]), cimag(roots[i]));
+  for (int dx = 0; dx < degree; ++dx) {
+    roots[dx] = cexp(2 * kPi * I * dx / degree);
+    // printf("roots[%d] = %.2f %+.2fi\n", dx, creal(roots[dx]), cimag(roots[dx]));
   }
 #if 0
   int r;
@@ -523,6 +532,7 @@ int main(int argc, char* const* argv) {
     thrd_args[tx].attractors = attractors;
     thrd_args[tx].convergences = convergences;
     thrd_args[tx].computed_lines = computed_lines;
+    thrd_args[tx].roots = roots;
     r = thrd_create(&compute_threads[tx], compute_thread, (void*)(&thrd_args[tx]));
     if (r != thrd_success) {
       fprintf(stderr, "ERROR. Failed to create thread %d. Exiting.\n", tx);
@@ -536,7 +546,7 @@ int main(int argc, char* const* argv) {
    */
   for (double zre = kMinRange, i = 0; i < num_lines; ++i, zre += kStep) {
     for (double zim = kMinRange, j = 0; j < num_lines; ++j, zim += kStep) {
-      rootiter(zre + zim * I, &attractors[(int)i][(int)j], &convergences[(int)i][(int)j]);
+      rootiter(roots, zre + zim * I, &attractors[(int)i][(int)j], &convergences[(int)i][(int)j]);
     }
   }
 #endif
