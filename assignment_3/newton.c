@@ -59,8 +59,12 @@ typedef struct {
   int* computed_lines;
 } thrd_args_t;
 
+inline double absd(const double x) {
+  return (x > 0) ? x : -x;
+}
+
 // bool is_below_threshold(double complex z) {
-bool is_below_threshold(double zre, double zim) {
+inline bool is_below_threshold(double zre, double zim) {
   // Remember: cabs() it's a norm operation, i.e. a distance calculation: |z| =
   // sqrt(re^2 + im^2)
   //
@@ -88,7 +92,7 @@ bool is_below_threshold(double zre, double zim) {
   return zre * zre + zim * zim < kEpsilonSquared;
 }
 
-void rootiter(double complex z, attr_t* attr_final, conv_t* conv_final) {
+inline void rootiter(double complex z, attr_t* attr_final, conv_t* conv_final) {
   const attr_t kAttrDefaultVal = 0; // (attr_t)NAN;
   attr_t attr = kAttrDefaultVal;
   conv_t conv = 0;
@@ -111,9 +115,23 @@ void rootiter(double complex z, attr_t* attr_final, conv_t* conv_final) {
     // TODO: Julia implementation uses enumerate(), do we need to start from 1
     // then?
     for (int i = 0; i < degree; ++i) {
+      // if (is_below_threshold(zre_diff, zim_diff)) {
+      //   attr = i;
+      //   break;
+      // }
       double zre_diff = zre - creal(roots[i]);
+      if (kEpsilon < absd(zre_diff)) {
+        continue;
+      }
       double zim_diff = zim - cimag(roots[i]);
-      if (is_below_threshold(zre_diff, zim_diff)) {
+      if (kEpsilon < absd(zim_diff)) {
+        continue;
+      }
+      if (absd(zre_diff) + absd(zim_diff) < kEpsilon) {
+        attr = i;
+        break;
+      }
+      if (zre_diff * zre_diff + zim_diff * zim_diff < kEpsilonSquared) {
         attr = i;
         break;
       }
