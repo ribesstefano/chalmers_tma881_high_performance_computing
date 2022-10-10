@@ -40,20 +40,8 @@ const int kBlockSize = 100;
 const char kASCII_Char2Int = 48;
 static const double kNaN = 0.0 / 0.0; // NOTE: NAN should be avail from math.h
 
-typedef int conv_t;
-typedef int attr_t;
-
-// TODO: Be careful about alignment!!!
-typedef struct attractor_t {
-  int attr;
-  int iter;
-} attractor_t;
-
-typedef struct {
-  mtx_t mtx;
-  cnd_t cnd;
-  size_t cnt;
-} smphr_t;
+typedef int16_t conv_t;
+typedef int32_t attr_t;
 
 // TODO: Be careful about alignment!!!
 typedef struct {
@@ -69,8 +57,6 @@ typedef struct {
   attr_t** attractors;
   conv_t** convergences;
   int* computed_lines;
-  smphr_t* idx_smphr;
-  smphr_t* thrd_smphr;
 } thrd_args_t;
 
 bool is_below_threshold(double complex z) {
@@ -81,91 +67,115 @@ bool is_below_threshold(double complex z) {
   // * triangle inequality
   // * in a rect. triangle, the hypothenuse is always less than each cathetus
   // * the square root can be avoided by comparing against a squared epsilon
-  const double zre = (creal(z) > 0) ? creal(z) : -creal(z);
-  const double zim = (cimag(z) > 0) ? cimag(z) : -cimag(z);
-  if (zre + zim < kEpsilon) {
-    // printf("NOT using cabs^2\n");
-    return true;
-  }
-  if (kEpsilon < zre) {
-    // printf("NOT using cabs^2\n");
-    return false;
-  }
-  if (kEpsilon < zim) {
-    // printf("NOT using cabs^2\n");
-    return false;
-  }
-  // printf("using cabs^2\n");
+  double zre = creal(z);
+  double zim = cimag(z);
+  // double zre = (zre > 0) ? zre : -zre;
+  // double zim = (zim > 0) ? zim : -zim;
+  // if (zre + zim < kEpsilon) {
+  //   // printf("NOT using cabs^2\n");
+  //   return true;
+  // }
+  // if (kEpsilon < zre) {
+  //   // printf("NOT using cabs^2\n");
+  //   return false;
+  // }
+  // if (kEpsilon < zim) {
+  //   // printf("NOT using cabs^2\n");
+  //   return false;
+  // }
+  // // printf("using cabs^2\n");
   return zre * zre + zim * zim < kEpsilonSquared;
 }
 
-attractor_t rootiter(double complex z) {
-  attractor_t ret;
-  ret.attr = (int)NAN;
-  ret.iter = 0;
+void rootiter(double complex z, attr_t* attr, conv_t* conv) {
+  const attr_t kAttrDefaultVal = 0; // (attr_t)NAN;
+  *attr = kAttrDefaultVal;
+  *conv = 0;
   // while(true) {
-  while(ret.iter < 50) {
+  while(*conv < 50) {
     if (creal(z) < kDivMinRe || creal(z) > kDivMaxRe ||
         cimag(z) < kDivMinIm || cimag(z) > kDivMaxIm) {
-      ret.attr = degree;
+      *attr = degree;
       break;
     }
     if (is_below_threshold(z)) {
-      ret.attr = degree + 1;
+      *attr = degree + 1;
     }
     // TODO: Julia implementation uses enumerate(), do we need to start from 1
     // then?
-    for (int i = 0; i < degree; ++i) {
+    for (int i = 1; i <= degree; ++i) {
       if (is_below_threshold(z - roots[i])) {
-        ret.attr = i;
+        *attr = i;
         break;
       }
     }
-    if (ret.attr != (int)NAN) {
+    if (*attr != kAttrDefaultVal) {
       break;
     }
     // TODO: The function cpow() must be removed. A switch-case on the degree
     // can help improving/optimizing the computation
     // z = z * (1. - 1. / degree) + 1. / cpow(z, (degree - 1)) / degree;
     switch (degree) {
-      case 1:
+      case 1: {
         z = 1.;
         break;
-      case 2:
+      }
+      case 2: {
         z = z / 2 + 1. / z / 2;
         break;
-      case 3:
-        z = z * (1. - 1. / 3) + 1. / (z * z) / 3;
+      }
+      case 3: {
+        z = z * (1. - 1. / 3.) + (1. / 3.) * 1. / (z * z);
         break;
-      case 4:
-        z = z * (1. - 1. / 4) + 1. / (z * z * z) / 4;
+      }
+      case 4: {
+        z = z * (1. - 1. / 4.) + (1. / 4.) * 1. / (z * z * z);
         break;
-      case 5:
-        z = z * (1. - 1. / 5) + 1. / (z * z * z * z) / 5;
+      }
+      case 5: {
+        double complex z2 = z * z;
+        z = z * (1. - 1. / 5.) + (1. / 5.) * 1. / (z2 * z2);
         break;
-      case 6:
-        z = z * (1. - 1. / 6) + 1. / (z * z * z * z * z) / 6;
+      }
+      case 6: {
+        double complex z2 = z * z;
+        z = z * (1. - 1. / 6.) + (1. / 6.) * 1. / (z2 * z2 * z);
         break;
-      case 7:
-        z = z * (1. - 1. / 7) + 1. / (z * z * z * z * z * z) / 7;
+      }
+      case 7: {
+        double complex z2 = z * z;
+        double complex z4 = z2 * z2;
+        z = z * (1. - 1. / 7.) + (1. / 7.) * 1. / (z4 * z2);
         break;
-      case 8:
-        z = z * (1. - 1. / 8) + 1. / (z * z * z * z * z * z * z) / 8;
+      }
+      case 8: {
+        double complex z2 = z * z;
+        double complex z4 = z2 * z2;
+        z = z * (1. - 1. / 8.) + (1. / 8.) * 1. / (z4 * z2 * z);
         break;
-      case 9:
-        z = z * (1. - 1. / 9) + 1. / (z * z * z * z * z * z * z * z) / 9;
+      }
+      case 9: {
+        double complex z2 = z * z;
+        double complex z4 = z2 * z2;
+        z = z * (1. - 1. / 9.) + (1. / 9.) * 1. / (z4 * z4);
         break;
+      }
       default:
         z = z * (1. - 1. / degree) + 1. / cpow(z, (degree - 1)) / degree;
         break;
     }
-    ret.iter++;
+    (*conv)++;
   }
-  ret.iter = (ret.iter < kIterCutoff) ? ret.iter : kIterCutoff - 1;
-  return ret;
+  *conv = (*conv < kIterCutoff) ? *conv : kIterCutoff - 1;
 }
 
 #if 0
+typedef struct {
+  mtx_t mtx;
+  cnd_t cnd;
+  size_t cnt;
+} smphr_t;
+
 int smphr_init(const size_t count, smphr_t* smphr) {
   smphr->cnt = count;
   int r = mtx_init(&smphr->mtx, mtx_plain);
@@ -214,27 +224,27 @@ int smphr_acquire(smphr_t* smphr) {
 #endif
 
 int compute_thread(void* args_in) {
-  thrd_args_t* args = (thrd_args_t*)args_in;
   attr_t* attractor = (attr_t*)malloc(num_lines * sizeof(attr_t));
   conv_t* convergence = (conv_t*)malloc(num_lines * sizeof(conv_t));
-  /*
-   * Main loop
-   */
+  // "Parse" arguments
+  thrd_args_t* args = (thrd_args_t*)args_in;
+  double zre;
   double zim = args->im_start_val;
   const double re_step = args->re_step;
   const double im_step = args->im_step;
-  for (int i = args->start_idx; i < num_lines; i += args->step, zim += im_step) {
+  const int start_idx = args->start_idx;
+  const int istep = args->step;
+  const int thread_id = args->id;
+  /*
+   * Main loop
+   */
+  for (int i = start_idx; i < num_lines; i += istep, zim += im_step) {
     // printf("Thread n.%d working on row %d (im: %f)\n", args->id, i, zim);
     // Start computation
-    double zre = args->re_start_val;
+    zre = args->re_start_val;
     for (int j = 0; j < num_lines; ++j, zre += re_step) {
-      const double complex x = zre + zim * I;
-      attractor_t ret = rootiter(x);
-      attractor[j] = ret.attr;
-      convergence[j] = ret.iter;
-      // zre += re_step;
+      rootiter(zre + zim * I, &attractor[j], &convergence[j]);
     }
-    // zim += im_step;
     // Update global, i.e. shared, variables
     mtx_lock(args->mtx);
     // Copy local to global
@@ -243,10 +253,11 @@ int compute_thread(void* args_in) {
       args->convergences[i][j] = convergence[j];
     }
     // Update thread status
-    args->computed_lines[args->id] = i + args->step;
+    args->computed_lines[thread_id] = i + istep;
     mtx_unlock(args->mtx);
     cnd_signal(args->cnd);
   }
+  // Free local buffers
   free(attractor);
   free(convergence);
   return 0;
@@ -265,6 +276,62 @@ int compute_thread(void* args_in) {
   // }
   // printf("Thread n.%d returning.\n", args->id);
   // return 0;
+}
+
+int write_thread(void* args_in) {
+//   // TODO
+//   char attr_str[] = "      ";
+//   char conv_str[] = "         ";
+//   const int kAttrStrLen = 6;
+//   const int kConvStrLen = 9;
+//   int upper_bound;
+//   int wr_line_idx = 0; // Written line index. In practice: lines written so far
+//   while (wr_line_idx < num_lines) {
+//     // If no new lines are available, we wait.
+//     mtx_lock(&mtx);
+//     while (1) {
+//       // Extract the minimum of all status variables
+//       upper_bound = num_lines;
+//       for (int tx = 0; tx < num_threads; ++tx) {
+//         if (upper_bound > computed_lines[tx]) {
+//           upper_bound = computed_lines[tx];
+//         }
+//       }
+//       if (upper_bound <= wr_line_idx) {
+//         // We rely on spurious wake-ups, which in practice happen, but are not
+//         // guaranteed.
+//         cnd_wait(&cnd, &mtx);
+//       } else {
+//         mtx_unlock(&mtx);
+//         break;
+//       }
+//     }
+//     // Write to file lines that have been computed so far
+//     while (wr_line_idx < upper_bound) {
+//       for (int j = 0; j < num_lines; ++j) {
+//         int iter = convergences[wr_line_idx][j];
+//         int attr = attractors[wr_line_idx][j];
+
+//         int attr1 = (attr + 1 * num_attractor / 3) % num_attractor;
+//         int attr2 = (attr + 2 * num_attractor / 3) % num_attractor;
+//         // Setup attractor string
+//         attr_str[0] = kASCII_Char2Int + attr;
+//         attr_str[2] = kASCII_Char2Int + attr1;
+//         attr_str[4] = kASCII_Char2Int + attr2;
+//         // Setup convergence string
+//         conv_str[1] = conv_str[4] = conv_str[7] = kASCII_Char2Int + iter % 10;
+//         conv_str[0] = conv_str[3] = conv_str[6] = kASCII_Char2Int + (iter / 10) % 10;
+//         // Write employing fwrite
+//         fwrite(attr_str, 1, kAttrStrLen, attr_fp);
+//         fwrite(conv_str, 1, kConvStrLen, iter_fp);
+//         // fprintf(attr_fp, "%d %d %d ", attr, attr1, attr2);
+//         // fprintf(iter_fp, "%d %d %d ", iter, iter, iter);
+//       }
+//       fwrite("\n", 1, 1, attr_fp);
+//       fwrite("\n", 1, 1, iter_fp);
+//       ++wr_line_idx;
+//     }
+//   }
 }
 
 void get_filename(const int degree, const char* base, char* filename) {
@@ -373,16 +440,15 @@ int main(int argc, char* const* argv) {
   /*
    * Allocate arrays
    */
-  const size_t kAttrItersSize = sizeof(attractor_t) * num_lines * num_lines;
-  attr_t* attractors_entries = (attr_t*)malloc(kAttrItersSize);
-  conv_t* convergences_entries = (conv_t*)malloc(kAttrItersSize);
-  attr_t** attractors = (attr_t**)malloc(kAttrItersSize / num_lines);
-  conv_t** convergences = (conv_t**)malloc(kAttrItersSize / num_lines);
+  attr_t* attractors_entries = (attr_t*)malloc(sizeof(attr_t) * num_lines * num_lines);
+  conv_t* convergences_entries = (conv_t*)malloc(sizeof(attr_t) * num_lines * num_lines);
+  attr_t** attractors = (attr_t**)malloc(sizeof(attr_t*) * num_lines);
+  conv_t** convergences = (conv_t**)malloc(sizeof(attr_t*) * num_lines);
   for (int i = 0, j = 0; i < num_lines; ++i, j += num_lines) {
     attractors[i] = attractors_entries + j;
     convergences[i] = convergences_entries + j;
   }
-  int* computed_lines = (int*) malloc(num_threads * sizeof(int));
+  int* computed_lines = (int*)malloc(num_threads * sizeof(int));
   /*
    * Define and init mutex and conv.var
    */
@@ -431,9 +497,7 @@ int main(int argc, char* const* argv) {
    */
   for (double zre = kMinRange, i = 0; i < num_lines; ++i, zre += kStep) {
     for (double zim = kMinRange, j = 0; j < num_lines; ++j, zim += kStep) {
-      attractor_t ret = rootiter(zre + zim * I);
-      attractors[(int)i][(int)j] = ret.attr;
-      convergences[(int)i][(int)j] = ret.iter;
+      rootiter(zre + zim * I, &attractors[(int)i][(int)j], &convergences[(int)i][(int)j]);
     }
   }
 #endif
@@ -469,6 +533,7 @@ int main(int argc, char* const* argv) {
     }
     // Write to file lines that have been computed so far
     while (wr_line_idx < upper_bound) {
+      // TODO: Writing larger chunks to the files?
       for (int j = 0; j < num_lines; ++j) {
         int iter = convergences[wr_line_idx][j];
         int attr = attractors[wr_line_idx][j];
@@ -485,8 +550,6 @@ int main(int argc, char* const* argv) {
         // Write employing fwrite
         fwrite(attr_str, 1, kAttrStrLen, attr_fp);
         fwrite(conv_str, 1, kConvStrLen, iter_fp);
-        // fprintf(attr_fp, "%d %d %d ", attr, attr1, attr2);
-        // fprintf(iter_fp, "%d %d %d ", iter, iter, iter);
       }
       fwrite("\n", 1, 1, attr_fp);
       fwrite("\n", 1, 1, iter_fp);
@@ -525,10 +588,10 @@ int main(int argc, char* const* argv) {
   /*
    * Close files and cleanup (free arrays and destroy synchronization variable)
    */
-  free(attractors);
-  free(convergences);
   free(attractors_entries);
   free(convergences_entries);
+  free(attractors);
+  free(convergences);
   free(roots);
   fclose(attr_fp);
   fclose(iter_fp);
