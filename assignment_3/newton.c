@@ -30,7 +30,7 @@ atomic_int_least16_t next_idx = 0;
 const int kMaxDegree = 9;
 const int kIterCutoff = 100;
 const double kEpsilon = 1e-3;
-const double kEpsilonSquared = 1e-6;
+const double kEpsilonSquared = kEpsilon * kEpsilon;
 const double kDivMinRe = -1e10;
 const double kDivMaxRe = 1e10;
 const double kDivMinIm = -1e10;
@@ -73,15 +73,30 @@ typedef struct {
   smphr_t* thrd_smphr;
 } thrd_args_t;
 
-/**
- * @brief      Squared complex absolute value of a complex number
- *
- * @param[in]  z  The complex number
- *
- * @return     The squared absolute value
- */
-double csqabs(const double complex z) {
-  return creal(z) * creal(z) + cimag(z) * cimag(z);
+bool is_below_threshold(double complex z) {
+  // Remember: cabs() it's a norm operation, i.e. a distance calculation: |z| =
+  // sqrt(re^2 + im^2)
+  //
+  // There are three optimizations we can exploit:
+  // * triangle inequality
+  // * in a rect. triangle, the hypothenuse is always less than each cathetus
+  // * the square root can be avoided by comparing against a squared epsilon
+  const double zre = (creal(z) > 0) ? creal(z) : -creal(z);
+  const double zim = (cimag(z) > 0) ? cimag(z) : -cimag(z);
+  if (zre + zim < kEpsilon) {
+    // printf("NOT using cabs^2\n");
+    return true;
+  }
+  if (kEpsilon < zre) {
+    // printf("NOT using cabs^2\n");
+    return false;
+  }
+  if (kEpsilon < zim) {
+    // printf("NOT using cabs^2\n");
+    return false;
+  }
+  // printf("using cabs^2\n");
+  return zre * zre + zim * zim < kEpsilonSquared;
 }
 
 attractor_t rootiter(double complex z) {
@@ -95,20 +110,13 @@ attractor_t rootiter(double complex z) {
       ret.attr = degree;
       break;
     }
-    // TODO: The use of cabs() can be avoided. Remember cabs() it's a norm
-    // operation, i.e. a distance calculation: |z| = sqrt(re^2 + im^2)
-    //
-    // For instance, I can avoid computing the root by comparing against a
-    // squared epsilon.
-    // if (cabs(z) < kEpsilon) {
-    if (csqabs(z) < kEpsilonSquared) {
+    if (is_below_threshold(z)) {
       ret.attr = degree + 1;
     }
     // TODO: Julia implementation uses enumerate(), do we need to start from 1
     // then?
     for (int i = 0; i < degree; ++i) {
-      // if (cabs(z - roots[i]) < kEpsilon) {
-      if (csqabs(z - roots[i]) < kEpsilonSquared) {
+      if (is_below_threshold(z - roots[i])) {
         ret.attr = i;
         break;
       }
@@ -157,8 +165,7 @@ attractor_t rootiter(double complex z) {
   return ret;
 }
 
-
-
+#if 0
 int smphr_init(const size_t count, smphr_t* smphr) {
   smphr->cnt = count;
   int r = mtx_init(&smphr->mtx, mtx_plain);
@@ -204,6 +211,7 @@ int smphr_acquire(smphr_t* smphr) {
   mtx_unlock(&smphr->mtx);
   return idx;
 }
+#endif
 
 int compute_thread(void* args_in) {
   thrd_args_t* args = (thrd_args_t*)args_in;
