@@ -36,7 +36,7 @@ const double kDivMaxRe = 1e10;
 const double kDivMinIm = -1e10;
 const double kDivMaxIm = 1e10;
 const double kPi = 22.0 / 7.0;
-const int kBlockSize = 100;
+const int kBlockSize = 100; // Deprecated
 const char kASCII_Char2Int = 48;
 static const double kNaN = 0.0 / 0.0; // NOTE: NAN should be avail from math.h
 
@@ -69,48 +69,51 @@ bool is_below_threshold(double complex z) {
   // * the square root can be avoided by comparing against a squared epsilon
   double zre = creal(z);
   double zim = cimag(z);
-  // double zre = (zre > 0) ? zre : -zre;
-  // double zim = (zim > 0) ? zim : -zim;
-  // if (zre + zim < kEpsilon) {
-  //   // printf("NOT using cabs^2\n");
-  //   return true;
-  // }
-  // if (kEpsilon < zre) {
-  //   // printf("NOT using cabs^2\n");
-  //   return false;
-  // }
-  // if (kEpsilon < zim) {
-  //   // printf("NOT using cabs^2\n");
-  //   return false;
-  // }
-  // // printf("using cabs^2\n");
+  zre = (zre > 0) ? zre : -zre;
+  zim = (zim > 0) ? zim : -zim;
+  if (kEpsilon < zre) {
+    // printf("NOT using cabs^2\n");
+    return false;
+  }
+  if (kEpsilon < zim) {
+    // printf("NOT using cabs^2\n");
+    return false;
+  }
+  if (zre + zim < kEpsilon) {
+    // printf("NOT using cabs^2\n");
+    return true;
+  }
+  // printf("using cabs^2\n");
   return zre * zre + zim * zim < kEpsilonSquared;
 }
 
-void rootiter(double complex z, attr_t* attr, conv_t* conv) {
+void rootiter(double complex z, attr_t* attr_final, conv_t* conv_final) {
   const attr_t kAttrDefaultVal = 0; // (attr_t)NAN;
-  *attr = kAttrDefaultVal;
-  *conv = 0;
+  attr_t attr = kAttrDefaultVal;
+  conv_t conv = 0;
   // while(true) {
-  while(*conv < 50) {
+  while(conv < 50) {
     if (creal(z) < kDivMinRe || creal(z) > kDivMaxRe ||
         cimag(z) < kDivMinIm || cimag(z) > kDivMaxIm) {
-      *attr = degree;
+      attr = degree;
       break;
     }
     if (is_below_threshold(z)) {
-      *attr = degree + 1;
+      attr = degree + 1;
       break;
     }
+    // TODO: The square norm of a complex number is the sum of two squares. When
+    // computing it for a difference x - x', how can one avoid computing twice
+    // the difference of the respective real and imaginary parts?
     // TODO: Julia implementation uses enumerate(), do we need to start from 1
     // then?
-    for (int i = 1; i <= degree; ++i) {
+    for (int i = 0; i < degree; ++i) {
       if (is_below_threshold(z - roots[i])) {
-        *attr = i - 1;
+        attr = i;
         break;
       }
     }
-    if (*attr != kAttrDefaultVal) {
+    if (attr != kAttrDefaultVal) {
       break;
     }
     // TODO: The function cpow() must be removed. A switch-case on the degree
@@ -165,9 +168,11 @@ void rootiter(double complex z, attr_t* attr, conv_t* conv) {
         z = z * (1. - 1. / degree) + 1. / cpow(z, (degree - 1)) / degree;
         break;
     }
-    (*conv)++;
+    (conv)++;
   }
-  *conv = (*conv < kIterCutoff) ? *conv : kIterCutoff - 1;
+  conv = (conv < kIterCutoff) ? conv : kIterCutoff - 1;
+  *attr_final = attr;
+  *conv_final = conv;
 }
 
 #if 0
