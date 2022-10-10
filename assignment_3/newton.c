@@ -59,7 +59,8 @@ typedef struct {
   int* computed_lines;
 } thrd_args_t;
 
-bool is_below_threshold(double complex z) {
+// bool is_below_threshold(double complex z) {
+bool is_below_threshold(double zre, double zim) {
   // Remember: cabs() it's a norm operation, i.e. a distance calculation: |z| =
   // sqrt(re^2 + im^2)
   //
@@ -67,8 +68,8 @@ bool is_below_threshold(double complex z) {
   // * triangle inequality
   // * in a rect. triangle, the hypothenuse is always less than each cathetus
   // * the square root can be avoided by comparing against a squared epsilon
-  double zre = creal(z);
-  double zim = cimag(z);
+  // double zre = creal(z);
+  // double zim = cimag(z);
   zre = (zre > 0) ? zre : -zre;
   zim = (zim > 0) ? zim : -zim;
   if (kEpsilon < zre) {
@@ -93,12 +94,14 @@ void rootiter(double complex z, attr_t* attr_final, conv_t* conv_final) {
   conv_t conv = 0;
   // while(true) {
   while(conv < 50) {
-    if (creal(z) < kDivMinRe || creal(z) > kDivMaxRe ||
-        cimag(z) < kDivMinIm || cimag(z) > kDivMaxIm) {
+    double zre = creal(z);
+    double zim = cimag(z);
+    if (zre < kDivMinRe || zre > kDivMaxRe ||
+        zim < kDivMinIm || zim > kDivMaxIm) {
       attr = degree;
       break;
     }
-    if (is_below_threshold(z)) {
+    if (is_below_threshold(zre, zim)) {
       attr = degree + 1;
       break;
     }
@@ -108,7 +111,9 @@ void rootiter(double complex z, attr_t* attr_final, conv_t* conv_final) {
     // TODO: Julia implementation uses enumerate(), do we need to start from 1
     // then?
     for (int i = 0; i < degree; ++i) {
-      if (is_below_threshold(z - roots[i])) {
+      double zre_diff = zre - creal(roots[i]);
+      double zim_diff = zim - cimag(roots[i]);
+      if (is_below_threshold(zre_diff, zim_diff)) {
         attr = i;
         break;
       }
