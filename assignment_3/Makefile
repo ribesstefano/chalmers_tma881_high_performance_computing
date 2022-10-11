@@ -1,5 +1,5 @@
 CXX := gcc
-CFLAGS := -std=c11 -O3
+CFLAGS := -std=c11 -O3 -march=native
 LDFLAGS = -lm -lpthread
 
 SOURCES = $(wildcard *.c)
@@ -7,21 +7,18 @@ EXECS = $(patsubst %.c, %.exe, $(SOURCES))
 
 .PHONY: all
 
-all: newton multi_stage
+all: newton
 
 newton: newton.c
-	$(CXX) $(CFLAGS) -march=native $< -o newton $(LDFLAGS)
-
-multi_stage: multi_stage.c
-	$(CXX) $(CFLAGS) -march=native $< -o multi_stage $(LDFLAGS)
+	$(CXX) $(CFLAGS) $< -o newton $(LDFLAGS)
 
 images: SHELL:=/bin/bash
 images:
 	for i in *.ppm ; \
 	do \
-		outname="`echo "$$i" | cut -d'.' -f1`.jpg" ; \
+		outname="`echo "$$i" | cut -d'.' -f1`.png" ; \
 		echo "# ===========================================================" ; \
-		echo "# Generating JPG image '$${outname}'" ; \
+		echo "# Generating PNG image '$${outname}'" ; \
 		echo "# ===========================================================" ; \
 		convert "$$i" "$$outname" ; \
 	done
@@ -31,10 +28,11 @@ test: newton
 	$(MAKE) images
 
 compress: Makefile newton.c
-	tar -czvf submission.tar.gz Makefile newton.c c11threads.h
+	tar -czvf submission.tar.gz Makefile newton.c
 
 check: compress
-	python3 ../../newton_iteration/check_submission.py submission.tar.gz
+	# python3 ../../newton_iteration/check_submission.py submission.tar.gz
+	python3 /home/hpc2022/newton_iteration/check_submission.py submission.tar.gz
 
 clean:
-	rm -rf *.exe *.o *.s ./newton ./multi_stage *.ppm *.jpg extracted/ pictures/
+	rm -rf *.exe *.o *.s ./newton *.ppm *.png extracted/ pictures/
