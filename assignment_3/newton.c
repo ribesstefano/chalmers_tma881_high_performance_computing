@@ -6,8 +6,8 @@
 #include <time.h>
 #include <stdint.h>
 #include <fcntl.h>
-#include <math.h>
 #include <getopt.h>
+#include <math.h>
 #include <complex.h>
 #include <stdatomic.h>
 
@@ -35,7 +35,7 @@ const double kDivMinRe = -1e10;
 const double kDivMaxRe = 1e10;
 const double kDivMinIm = -1e10;
 const double kDivMaxIm = 1e10;
-const double kPi = 22.0 / 7.0;
+const double kPi = 3.14159265359; // 22.0 / 7.0;
 const int kBlockSize = 100; // Deprecated
 const char kASCII_Char2Int = 48;
 static const double kNaN = 0.0 / 0.0; // NOTE: NAN should be avail from math.h
@@ -61,7 +61,7 @@ typedef struct {
 } thrd_args_t;
 
 inline double absd(const double x) {
-  return (x > 0) ? x : -x;
+  return (x > 0.) ? x : -x;
 }
 
 // bool is_below_threshold(double complex z) {
@@ -75,31 +75,26 @@ inline bool is_below_threshold(double zre, double zim) {
   // * the square root can be avoided by comparing against a squared epsilon
   // double zre = creal(z);
   // double zim = cimag(z);
-  // zre = (zre > 0) ? zre : -zre;
-  // zim = (zim > 0) ? zim : -zim;
-  // if (kEpsilon < zre) {
-  //   // printf("NOT using cabs^2\n");
-  //   return false;
-  // }
-  // if (kEpsilon < zim) {
-  //   // printf("NOT using cabs^2\n");
-  //   return false;
-  // }
-  // if (zre + zim < kEpsilon) {
-  //   // printf("NOT using cabs^2\n");
-  //   return true;
-  // }
-  // printf("using cabs^2\n");
+  zre = absd(zre);
+  zim = absd(zim);
+  if (kEpsilon < zre) {
+    return false;
+  }
+  if (kEpsilon < zim) {
+    return false;
+  }
+  if (zre + zim < kEpsilon) {
+    return true;
+  }
   return zre * zre + zim * zim < kEpsilonSquared;
 }
 
 inline void rootiter(const double complex* roots_in, const double complex z_in, attr_t* attr_final, conv_t* conv_final) {
-  const attr_t kAttrDefaultVal = 0; // (attr_t)NAN;
-  attr_t attr = kAttrDefaultVal;
-  conv_t conv = 0;
+  const attr_t kAttrDefaultVal = -1; // (attr_t)NAN;
+  int attr = kAttrDefaultVal;
+  int conv = 0;
   double complex z = z_in;
-  // while(true) {
-  while(conv < 50) {
+  while(true) {
     double zre = creal(z);
     double zim = cimag(z);
     if (zre < kDivMinRe || zre > kDivMaxRe ||
@@ -107,20 +102,10 @@ inline void rootiter(const double complex* roots_in, const double complex z_in, 
       attr = degree;
       break;
     }
-
     if (is_below_threshold(zre, zim)) {
       attr = degree + 1;
       break;
     }
-    // if (absd(zre) + absd(zim) < kEpsilon) {
-    //   attr = degree + 1;
-    //   break;
-    // }
-    // if (zre * zre + zim * zim < kEpsilonSquared) {
-    //   attr = degree + 1;
-    //   break;
-    // }
-
     // TODO: The square norm of a complex number is the sum of two squares. When
     // computing it for a difference x - x', how can one avoid computing twice
     // the difference of the respective real and imaginary parts?
@@ -128,34 +113,27 @@ inline void rootiter(const double complex* roots_in, const double complex z_in, 
     // then?
     for (int i = 0; i < degree; ++i) {
       double zre_diff = zre - creal(roots_in[i]);
+      if (kEpsilon < absd(zre_diff)) {
+        continue;
+      }
       double zim_diff = zim - cimag(roots_in[i]);
-      if (is_below_threshold(zre_diff, zim_diff)) {
+      if (kEpsilon < absd(zim_diff)) {
+        continue;
+      }
+      if (absd(zre_diff) + absd(zim_diff) < kEpsilon) {
         attr = i;
         break;
       }
-      // double zre_diff = zre - creal(roots_in[i]);
-      // if (kEpsilon < absd(zre_diff)) {
-      //   continue;
-      // }
-      // double zim_diff = zim - cimag(roots_in[i]);
-      // if (kEpsilon < absd(zim_diff)) {
-      //   continue;
-      // }
-      // if (absd(zre_diff) + absd(zim_diff) < kEpsilon) {
-      //   attr = i;
-      //   break;
-      // }
-      // if (zre_diff * zre_diff + zim_diff * zim_diff < kEpsilonSquared) {
-      //   attr = i;
-      //   break;
-      // }
+      if (zre_diff * zre_diff + zim_diff * zim_diff < kEpsilonSquared) {
+        attr = i;
+        break;
+      }
     }
     if (attr != kAttrDefaultVal) {
       break;
     }
     // TODO: The function cpow() must be removed. A switch-case on the degree
     // can help improving/optimizing the computation
-    // z = z * (1. - 1. / degree) + 1. / cpow(z, (degree - 1)) / degree;
     switch (degree) {
       case 1: {
         z = 1.;
@@ -166,50 +144,50 @@ inline void rootiter(const double complex* roots_in, const double complex z_in, 
         break;
       }
       case 3: {
-        z = z * (1. - 1. / 3.) + (1. / 3.) * 1. / (z * z);
+        z = z * (1. - 1. / 3.) + (1. / 3.) / (z * z);
         break;
       }
       case 4: {
-        z = z * (1. - 1. / 4.) + (1. / 4.) * 1. / (z * z * z);
+        z = z * (1. - 1. / 4.) + (1. / 4.) / (z * z * z);
         break;
       }
       case 5: {
         double complex z2 = z * z;
-        z = z * (1. - 1. / 5.) + (1. / 5.) * 1. / (z2 * z2);
+        z = z * (1. - 1. / 5.) + (1. / 5.) / (z2 * z2);
         break;
       }
       case 6: {
         double complex z2 = z * z;
-        z = z * (1. - 1. / 6.) + (1. / 6.) * 1. / (z2 * z2 * z);
+        z = z * (1. - 1. / 6.) + (1. / 6.) / (z2 * z2 * z);
         break;
       }
       case 7: {
         double complex z2 = z * z;
         double complex z4 = z2 * z2;
-        z = z * (1. - 1. / 7.) + (1. / 7.) * 1. / (z4 * z2);
+        z = z * (1. - 1. / 7.) + (1. / 7.) / (z4 * z2);
         break;
       }
       case 8: {
         double complex z2 = z * z;
         double complex z4 = z2 * z2;
-        z = z * (1. - 1. / 8.) + (1. / 8.) * 1. / (z4 * z2 * z);
+        z = z * (1. - 1. / 8.) + (1. / 8.) / (z4 * z2 * z);
         break;
       }
       case 9: {
         double complex z2 = z * z;
         double complex z4 = z2 * z2;
-        z = z * (1. - 1. / 9.) + (1. / 9.) * 1. / (z4 * z4);
+        z = z * (1. - 1. / 9.) + (1. / 9.) / (z4 * z4);
         break;
       }
       default:
         z = z * (1. - 1. / degree) + 1. / cpow(z, (degree - 1)) / degree;
         break;
     }
-    (conv)++;
+    ++conv;
   }
   conv = (conv < kIterCutoff) ? conv : kIterCutoff - 1;
-  *attr_final = attr;
-  *conv_final = conv;
+  *attr_final = (attr_t)attr;
+  *conv_final = (conv_t)conv;
 }
 
 #if 0
@@ -267,7 +245,7 @@ int smphr_acquire(smphr_t* smphr) {
 #endif
 
 int compute_thread(void* args_in) {
-  double complex* roots = (double complex*)malloc(degree * sizeof(double complex));
+  double complex* loc_roots = (double complex*)malloc(degree * sizeof(double complex));
   attr_t* attractor = (attr_t*)malloc(num_lines * sizeof(attr_t));
   conv_t* convergence = (conv_t*)malloc(num_lines * sizeof(conv_t));
   // "Parse" arguments
@@ -280,7 +258,7 @@ int compute_thread(void* args_in) {
   const int istep = args->step;
   const int thread_id = args->id;
   for (int i = 0; i < degree; ++i) {
-    roots[i] = args->roots[i];
+    loc_roots[i] = args->roots[i];
   }
   /*
    * Main loop
@@ -290,7 +268,8 @@ int compute_thread(void* args_in) {
     // Start computation
     zre = args->re_start_val;
     for (int j = 0; j < num_lines; ++j, zre += re_step) {
-      rootiter(roots, zre + zim * I, &attractor[j], &convergence[j]);
+      // printf("[TX %d] Working on element (%d, %d): %f + (%f i)\n", args->id, i, j, zre, zim);
+      rootiter(loc_roots, zre + zim * I, &attractor[j], &convergence[j]);
     }
     // Update global, i.e. shared, variables
     mtx_lock(args->mtx);
@@ -307,7 +286,7 @@ int compute_thread(void* args_in) {
   // Free local buffers
   free(attractor);
   free(convergence);
-  free(roots);
+  free(loc_roots);
   return 0;
   // printf("Hello from thread n.%d\n", args->id);
   // int idx = smphr_acquire(args->idx_smphr);
@@ -445,9 +424,12 @@ int main(int argc, char* const* argv) {
   /*
    * Precompute roots
    */
+  // printf("kPi: %.64f\n", kPi);
+  // printf("22.0 / 7.0: %.64f (diff: %.64f)\n", 22.0 / 7.0, abs(kPi - 22.0 / 7.0));
+  // printf("4.0 * atan(1.0): %.64f (diff: %.64f)\n", 4.0 * atan(1.0), abs(kPi - 4.0 * atan(1.0)));
   roots = (double complex*)malloc(degree * sizeof(double complex));
   for (int dx = 0; dx < degree; ++dx) {
-    roots[dx] = cexp(2 * kPi * I * dx / degree);
+    roots[dx] = cexp((2. * kPi * I * dx) / ((double)degree));
     // printf("roots[%d] = %.2f %+.2fi\n", dx, creal(roots[dx]), cimag(roots[dx]));
   }
 #if 0
