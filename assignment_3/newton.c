@@ -35,7 +35,7 @@ const double kDivMinRe = -1e10;
 const double kDivMaxRe = 1e10;
 const double kDivMinIm = -1e10;
 const double kDivMaxIm = 1e10;
-const double kPi = 3.14159265359; // 22.0 / 7.0;
+const double kPi = 4.0 * atan(1.0); // 3.14159265359; // 22.0 / 7.0;
 const int kBlockSize = 100; // Deprecated
 const char kASCII_Char2Int = 48;
 static const double kNaN = 0.0 / 0.0; // NOTE: NAN should be avail from math.h
@@ -62,6 +62,10 @@ typedef struct {
 
 inline double absd(const double x) {
   return (x > 0.) ? x : -x;
+}
+
+inline int min(const int a, const int b) {
+  return (a < b) ? a : b;
 }
 
 // bool is_below_threshold(double complex z) {
@@ -535,10 +539,11 @@ int main(int argc, char* const* argv) {
   /*
    * Write to file (dump data into images)
    */
-  char attr_str[] = "      ";
-  char conv_str[] = "         ";
   const int kAttrStrLen = 6;
   const int kConvStrLen = 9;
+  const int kWriteBufferSize = 256;
+  char* attr_wr_buffer = (char*)malloc(kAttrStrLen * kWriteBufferSize);
+  char* conv_wr_buffer = (char*)malloc(kConvStrLen * kWriteBufferSize);
 #if USE_MULTITHREADING
   int upper_bound;
   int wr_line_idx = 0; // Written line index. In practice: lines written so far
@@ -564,26 +569,43 @@ int main(int argc, char* const* argv) {
     }
     // Write to file lines that have been computed so far
     while (wr_line_idx < upper_bound) {
-      // TODO: Writing larger chunks to the files?
-      for (int j = 0; j < num_lines; ++j) {
-        int iter = convergences[wr_line_idx][j];
-        int attr = attractors[wr_line_idx][j];
-
-        int attr1 = (attr + 1 * num_attractor / 3) % num_attractor;
-        int attr2 = (attr + 2 * num_attractor / 3) % num_attractor;
-        // Setup attractor string
-        attr_str[0] = kASCII_Char2Int + attr;
-        attr_str[2] = kASCII_Char2Int + attr1;
-        attr_str[4] = kASCII_Char2Int + attr2;
-        // Setup convergence string
-        conv_str[1] = conv_str[4] = conv_str[7] = kASCII_Char2Int + iter % 10;
-        conv_str[0] = conv_str[3] = conv_str[6] = kASCII_Char2Int + (iter / 10) % 10;
-        // Write employing fwrite
-        fwrite(attr_str, 1, kAttrStrLen, attr_fp);
-        fwrite(conv_str, 1, kConvStrLen, iter_fp);
+      for (int j = 0; j < num_lines; j += kWriteBufferSize) {
+        for (int k = 0; j + k < min(j + kWriteBufferSize, num_lines); ++k) {
+          int conv = (int)convergences[wr_line_idx][j + k];
+          int attr = (int)attractors[wr_line_idx][j + k];
+          int attr1 = (attr + 1 * num_attractor / 3) % num_attractor;
+          int attr2 = (attr + 2 * num_attractor / 3) % num_attractor;
+          // Setup attractor string
+          attr_wr_buffer[k * kAttrStrLen + 0] = kASCII_Char2Int + attr;
+          attr_wr_buffer[k * kAttrStrLen + 1] = ' ';
+          attr_wr_buffer[k * kAttrStrLen + 2] = kASCII_Char2Int + attr1;
+          attr_wr_buffer[k * kAttrStrLen + 3] = ' ';
+          attr_wr_buffer[k * kAttrStrLen + 4] = kASCII_Char2Int + attr2;
+          attr_wr_buffer[k * kAttrStrLen + 5] = ' ';
+          // Setup convergence string
+          const char conv_dec = kASCII_Char2Int + (conv / 10) % 10;
+          const char conv_uni = kASCII_Char2Int + conv % 10;
+          conv_wr_buffer[k * kConvStrLen + 0] = conv_dec;
+          conv_wr_buffer[k * kConvStrLen + 1] = conv_uni;
+          conv_wr_buffer[k * kConvStrLen + 2] = ' ';
+          conv_wr_buffer[k * kConvStrLen + 3] = conv_dec;
+          conv_wr_buffer[k * kConvStrLen + 4] = conv_uni;
+          conv_wr_buffer[k * kConvStrLen + 5] = ' ';
+          conv_wr_buffer[k * kConvStrLen + 6] = conv_dec;
+          conv_wr_buffer[k * kConvStrLen + 7] = conv_uni;
+          conv_wr_buffer[k * kConvStrLen + 8] = ' ';
+        }
+        // Get the actual size of the write buffer in order to not overshoot
+        const int max_write_size = min(kWriteBufferSize, abs(num_lines - j));
+        // Add carriage return if writing last buffer for the current line
+        if (j + kWriteBufferSize >= num_lines) {
+          attr_wr_buffer[kAttrStrLen * max_write_size - 1] = '\n';
+          conv_wr_buffer[kConvStrLen * max_write_size - 1] = '\n';
+        }
+        // Write buffer to file using fwrite function
+        fwrite(attr_wr_buffer, 1, kAttrStrLen * max_write_size, attr_fp);
+        fwrite(conv_wr_buffer, 1, kConvStrLen * max_write_size, iter_fp);
       }
-      fwrite("\n", 1, 1, attr_fp);
-      fwrite("\n", 1, 1, iter_fp);
       ++wr_line_idx;
     }
   }
@@ -593,6 +615,8 @@ int main(int argc, char* const* argv) {
   free(compute_threads);
   free(thrd_args);
 #else
+  char attr_str[] = "      ";
+  char conv_str[] = "         ";
   for (int i = 0; i < num_lines; ++i) {
     for (int j = 0; j < num_lines; ++j) {
       int attr = attractors[i][j];
@@ -624,6 +648,8 @@ int main(int argc, char* const* argv) {
   free(attractors);
   free(convergences);
   free(roots);
+  free(attr_wr_buffer);
+  free(conv_wr_buffer);
   fclose(attr_fp);
   fclose(iter_fp);
   mtx_destroy(&mtx);
