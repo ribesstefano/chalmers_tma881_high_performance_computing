@@ -1,6 +1,6 @@
 CXX := gcc
 CFLAGS := -std=c11
-LDFLAGS = -lm # -lOpenCL
+LDFLAGS = -lm -lOpenCL
 
 SOURCES = $(wildcard *.c)
 EXECS = $(patsubst %.c, %.exe, $(SOURCES))
