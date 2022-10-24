@@ -1,5 +1,5 @@
 CXX := gcc
-CFLAGS := -std=c11
+CFLAGS := -std=c11 -O3 -march=native
 LDFLAGS = -lm -lOpenCL
 
 SOURCES = $(wildcard *.c)
@@ -7,19 +7,21 @@ EXECS = $(patsubst %.c, %.exe, $(SOURCES))
 
 .PHONY: all
 
-all: heat_diffusion
+all: diffusion
 
-heat_diffusion: heat_diffusion.c
-	$(CXX) $(CFLAGS) -O3 -march=native $< -o heat_diffusion $(LDFLAGS)
+diffusion: diffusion.c
+	$(CXX) $(CFLAGS) $< -o diffusion $(LDFLAGS)
 
-test: heat_diffusion
-	./heat_diffusion -n2 -d0.02
+test: diffusion
+	# ./diffusion -n2 -d0.02
+	./diffusion -d0.01 -n100000
 
-compress: Makefile heat_diffusion.c
-	tar -czvf submission.tar.gz Makefile heat_diffusion.c
+compress: Makefile diffusion.c kernel.cl
+	tar -czvf submission.tar.gz Makefile diffusion.c kernel.cl
 
-check: compress
-	python3 ../../heat_diffusion_iteration/check_submission.py submission.tar.gz
+check: compress clean
+	# python3 ../../diffusion_opencl/check_submission.py submission.tar.gz
+	python3 /home/hpc2022/diffusion_opencl/check_submission.py submission.tar.gz
 
 clean:
-	rm -rf *.exe *.o *.s ./heat_diffusion ./multi_stage *.ppm *.png extracted/ pictures/
+	rm -rf *.exe *.o *.s ./diffusion extracted
