@@ -5,6 +5,9 @@ LDFLAGS = -lm
 SOURCES = $(wildcard *.c)
 EXECS = $(patsubst %.c, %.exe, $(SOURCES))
 
+BLOCK_DIMS = -DBLOCK_SIZE_X=2048 -DBLOCK_SIZE_Y=2048
+CFLAGS += $(BLOCK_DIMS)
+
 .PHONY: all compress
 
 all: cell_distances

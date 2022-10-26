@@ -10,6 +10,13 @@
 #include <math.h>
 #include <getopt.h>
 
+#ifndef BLOCK_SIZE_X
+#define BLOCK_SIZE_X 2048
+#endif
+#ifndef BLOCK_SIZE_Y
+#define BLOCK_SIZE_Y 2048
+#endif
+
 // TODO: Using fixed point representation is faster, but it doesn't produce a
 // nice (and expected) normal distribution of the distance counts, i.e. with
 // higher counts for the distance values in the middle of the possible range [0,
@@ -161,15 +168,15 @@ int main(int argc, char* const* argv) {
   const long int kNumCells = ftell(fp) / kBytesPerLine;
   const int kNumDistances = kNumCells * kNumCells / 2 - kNumCells / 2;
   const int kMaxNumDistances = 3465+1;
-  const int kBlockSizeX = 2048;
-  const int kBlockSizeY = 2048;
+  const int kBlockSizeX = BLOCK_SIZE_X;
+  const int kBlockSizeY = BLOCK_SIZE_Y;
   const int kBufferSize = max(kBlockSizeX, kBlockSizeY);
   /*
    * Allocate dynamic arrays
    */
   // Cell block-buffers
-  cell_t* base_cells = (cell_t*)malloc(sizeof(cell_t) * kBlockSizeX);
-  cell_t* block_cells = (cell_t*)malloc(sizeof(cell_t) * kBlockSizeY);
+  cell_t* block_cells_x = (cell_t*)malloc(sizeof(cell_t) * kBlockSizeX);
+  cell_t* block_cells_y = (cell_t*)malloc(sizeof(cell_t) * kBlockSizeY);
   // Line buffer for reading "large chunks" from file
   char* line_buffer = (char*)malloc(kBytesPerLine * kBufferSize);
   // Distance counts, indexed by the distance values themselves
@@ -177,12 +184,12 @@ int main(int argc, char* const* argv) {
   /*
    * Check if allocation successful
    */
-  if (!base_cells) {
-    fprintf(stderr, "ERROR. Error while allocating 'base_cells'. Exiting\n");
+  if (!block_cells_x) {
+    fprintf(stderr, "ERROR. Error while allocating 'block_cells_x'. Exiting\n");
     exit(EXIT_FAILURE);
   }
-  if (!block_cells) {
-    fprintf(stderr, "ERROR. Error while allocating 'block_cells'. Exiting\n");
+  if (!block_cells_y) {
+    fprintf(stderr, "ERROR. Error while allocating 'block_cells_y'. Exiting\n");
     exit(EXIT_FAILURE);
   }
   if (!line_buffer) {
@@ -211,7 +218,7 @@ int main(int argc, char* const* argv) {
     block_size_x = min(i + kBlockSizeX, kNumCells) - i;
     fseek(fp, i * kBytesPerLine, SEEK_SET);
     fread(line_buffer, block_size_x * kBytesPerLine, 1, fp);
-    parse_lines(block_size_x, line_buffer, base_cells);
+    parse_lines(block_size_x, line_buffer, block_cells_x);
     /*
      * Scroll over all remaining cells starting from the current base (the rows)
      *
@@ -233,7 +240,7 @@ int main(int argc, char* const* argv) {
       block_size_y = min(j + kBlockSizeY, kNumCells) - j;
       fseek(fp, j * kBytesPerLine, SEEK_SET);
       fread(line_buffer, block_size_y * kBytesPerLine, 1, fp);
-      parse_lines(block_size_y, line_buffer, block_cells);
+      parse_lines(block_size_y, line_buffer, block_cells_y);
       // Compute distances in parallel: each entry in the block is independent
       //
       // TODO: Check the false-sharing problem.
@@ -249,11 +256,12 @@ int main(int argc, char* const* argv) {
       // moment.
       // 
       // NOTE: Using a reduction property is the key
-#pragma omp parallel for private(ii, jj) shared(i, j, base_cells, block_cells) \
+#pragma omp parallel for private(ii, jj) \
+  shared(i, j, block_cells_x, block_cells_y) \
   reduction(+:counts[:kMaxNumDistances])
       for (ii = 0; ii < block_size_x; ++ii) {
         for (jj = (j == i + 1) ? ii : 0; jj < block_size_y; ++jj) {
-          ++counts[float2ufix(cell_dist(base_cells[ii], block_cells[jj]))];
+          ++counts[float2ufix(cell_dist(block_cells_x[ii], block_cells_y[jj]))];
         }
       }
     }
@@ -279,8 +287,8 @@ int main(int argc, char* const* argv) {
    * Free all allocated memory
    */
   free(line_buffer);
-  free(base_cells);
-  free(block_cells);
+  free(block_cells_x);
+  free(block_cells_y);
   free(counts);
   fclose(fp);
   return 0;
