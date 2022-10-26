@@ -315,7 +315,8 @@ int main(int argc, char* const* argv) {
   // Clear OpenCL Objects
   clReleaseProgram(program);
   clReleaseKernel(kernel_heat_diffusion);
-  // clReleaseCommandQueue(command_queue);
+  clReleaseKernel(kernel_reduction);
+  clReleaseCommandQueue(command_queue);
   clReleaseContext(context);
   // Free host memory
   free(kernel_src);
