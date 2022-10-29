@@ -1,8 +1,7 @@
 # High Performance Computing
 
-[Assignments link](https://hpc.raum-brothers.eu/assignments.html).
+More details on the assignment can be viewed at this [link](https://hpc.raum-brothers.eu/assignments.html).
 
-[Course Material link](https://hpc.raum-brothers.eu/course_material.html).
 
 ## Assignment 0: Basic C Programming
 
@@ -24,8 +23,16 @@
 
 ## Assignment 2: OpenMP
 
+Implementing an efficient computation of all distances of a list of 3D points. More details can be viewed in "HPC - Oral Presentation Slides".
+
 ## Assignment 3: Threads
+
+Implementing the Newton's method for polynomials up to degree 9.
 
 ## Assignment 4: OpenCL
 
-## Assignment 5: MPI
+Applying the heat diffusion equation to a grid of 2D points for a series of iterations. The computational kernels have been implemented in OpenCL.
+
+## Literature
+
+[Link to the course material](https://hpc.raum-brothers.eu/course_material.html).
