@@ -1,6 +1,6 @@
 # High Performance Computing
 
-More details on the assignment can be viewed at this [link](https://hpc.raum-brothers.eu/assignments.html).
+More details on the assignment can be viewed at this [link](https://hpc.raum-brothers.eu/assignments/).
 
 
 ## Assignment 0: Basic C Programming
@@ -35,4 +35,4 @@ Applying the heat diffusion equation to a grid of 2D points for a series of iter
 
 ## Literature
 
-[Link to the course material](https://hpc.raum-brothers.eu/course_material.html).
+[Link to the course material](https://hpc.raum-brothers.eu/course_material/).
